@@ -21,8 +21,12 @@ export default function Home() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [type, setType] = useState("Kum Antrenmanı");
   const [amount, setAmount] = useState("");
-  const [currentLeaderboard, setCurrentLeaderboard] = useState<{ email: string; points: number }[]>([]);
-  const [lastWeekPodium, setLastWeekPodium] = useState<{ email: string; points: number }[]>([]);
+  const [currentLeaderboard, setCurrentLeaderboard] = useState<{ name: string; points: number; isMe: boolean }[]>([]);
+  const [lastWeekPodium, setLastWeekPodium] = useState<{ name: string; points: number }[]>([]);
+
+  // Profil İsim State'leri
+  const [displayName, setDisplayName] = useState("");
+  const [isUpdatingName, setIsUpdatingName] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -39,18 +43,50 @@ export default function Home() {
   useEffect(() => {
     if (user) {
       fetchWorkouts();
+      fetchMyProfile();
       fetchLeaderboards();
     } else {
       setWorkouts([]);
       setCurrentLeaderboard([]);
       setLastWeekPodium([]);
+      setDisplayName("");
     }
   }, [user]);
 
-  // Yardımcı Fonksiyon: Haftaların Başlangıç ve Bitiş Tarihlerini Bulma
+  // Kullanıcının kendi profil ismini çekme
+  const fetchMyProfile = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", user.id)
+      .single();
+
+    if (data) setDisplayName(data.display_name);
+  };
+
+  // İsim Güncelleme Fonksiyonu
+  const handleUpdateName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !displayName.trim()) return;
+
+    setIsUpdatingName(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ display_name: displayName })
+      .eq("id", user.id);
+
+    setIsUpdatingName(false);
+    if (error) {
+      alert("İsim güncellenirken hata oluştu: " + error.message);
+    } else {
+      alert("Harika! İsmin başarıyla güncellendi.");
+      fetchLeaderboards(); // Tabloları yeni isme göre tazele
+    }
+  };
+
   const getWeekRanges = () => {
     const now = new Date();
-    
     const currentMonday = new Date(now);
     const day = currentMonday.getDay();
     const diff = currentMonday.getDate() - day + (day === 0 ? -6 : 1); 
@@ -80,19 +116,31 @@ export default function Home() {
 
   const fetchLeaderboards = async () => {
     if (!user) return;
-    const { data, error } = await supabase.from("workouts").select("points, user_id, created_at");
-    if (error) {
-      console.error(error.message);
-      return;
-    }
 
-    if (data) {
+    // Hem antrenmanları hem de oyuncu isimlerini (profiles) tek seferde birleştirerek çekiyoruz (JOIN işlemi)
+    const { data: workoutsData, error: wError } = await supabase
+      .from("workouts")
+      .select("points, user_id, created_at");
+      
+    const { data: profilesData, error: pError } = await supabase
+      .from("profiles")
+      .select("id, display_name");
+
+    if (wError || pError) return;
+
+    // Oyuncu ID'lerini isimlerle eşleştiren bir sözlük oluşturuyoruz
+    const profileMap: { [key: string]: string } = {};
+    profilesData?.forEach(p => {
+      profileMap[p.id] = p.display_name || "Bilinmeyen Oyuncu";
+    });
+
+    if (workoutsData) {
       const { currentMonday, lastMonday, lastSunday } = getWeekRanges();
 
       const currentWeekMap: { [key: string]: number } = {};
       const lastWeekMap: { [key: string]: number } = {};
 
-      data.forEach((w) => {
+      workoutsData.forEach((w) => {
         const workoutDate = new Date(w.created_at || "");
 
         if (workoutDate >= currentMonday) {
@@ -103,13 +151,16 @@ export default function Home() {
         }
       });
 
+      // Bu Haftanın Sıralaması (Artık Gerçek İsimlerle)
       const sortedCurrent = Object.keys(currentWeekMap).map((uid) => ({
-        email: uid === user.id ? user.email : `Oyuncu (${uid.substring(0, 4)})`, 
+        name: profileMap[uid] || `Oyuncu (${uid.substring(0,4)})`,
         points: Number(currentWeekMap[uid].toFixed(1)),
+        isMe: uid === user.id
       })).sort((a, b) => b.points - a.points);
 
+      // Geçen Haftanın İlk 3'ü (Kürsü - Gerçek İsimlerle)
       const sortedLastWeek = Object.keys(lastWeekMap).map((uid) => ({
-        email: uid === user.id ? user.email : `Oyuncu (${uid.substring(0, 4)})`, 
+        name: profileMap[uid] || `Oyuncu (${uid.substring(0,4)})`,
         points: Number(lastWeekMap[uid].toFixed(1)),
       })).sort((a, b) => b.points - a.points).slice(0, 3); 
 
@@ -118,7 +169,6 @@ export default function Home() {
     }
   };
 
-  // --- EKSİK OLAN DOST FONKSİYONLAR GERİ GELDİ ---
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     const { error } = await supabase.auth.signUp({ email, password });
@@ -135,18 +185,13 @@ export default function Home() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
-  // ------------------------------------------------
 
   const calculatePoints = (type: string, amount: number) => {
     switch (type) {
-      case "Kum Antrenmanı": 
-        return amount * 10; 
-      case "Başka Takımla Antrenman": 
-        return amount * 6; 
-      case "Disk Atma (Throwing)": 
-        return Math.floor(amount / 30) * 4; 
-      case "Kondisyon (Gym/Yüzme/Koşu vs.)": 
-        return Math.floor(amount / 30) * 3; 
+      case "Kum Antrenmanı": return amount * 10; 
+      case "Başka Takımla Antrenman": return amount * 6;  
+      case "Disk Atma (Throwing)": return Math.floor(amount / 30) * 4; 
+      case "Kondisyon (Gym/Yüzme/Koşu vs.)": return Math.floor(amount / 30) * 3; 
       default: return 0;
     }
   };
@@ -215,38 +260,35 @@ export default function Home() {
             <span className="text-3xl">🥏</span>
             <div>
               <h1 className="text-xl font-extrabold text-white tracking-wide">FRİZBİ HUB</h1>
-              <p className="text-xs text-slate-400">Oyuncu: <span className="text-emerald-400 font-semibold">{user.email}</span></p>
+              <p className="text-xs text-slate-400">Giriş: <span className="text-slate-300">{user.email}</span></p>
             </div>
           </div>
           <button onClick={handleLogout} className="bg-slate-800 hover:bg-red-950 hover:text-red-400 text-slate-300 font-medium px-4 py-2 rounded-xl text-sm border border-slate-700 transition-all">Çıkış Yap</button>
         </header>
 
-        {/* GEÇEN HAFTANIN EN İYİLERİ (PODYUM/KÜRSÜ) BÖLÜMÜ */}
+        {/* GEÇEN HAFTANIN EN İYİLERİ */}
         {lastWeekPodium.length > 0 && (
           <div className="bg-gradient-to-r from-amber-500/10 via-slate-900 to-cyan-500/10 border border-slate-800 rounded-2xl p-6 shadow-xl text-center">
             <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-4">🏆 GEÇEN HAFTANIN EN İYİLERİ (KÜRSÜ)</h3>
             <div className="flex flex-wrap justify-center items-end gap-4 pt-2">
-              {/* 2. Sıra */}
               {lastWeekPodium[1] && (
-                <div className="bg-slate-900/80 border border-slate-700 p-4 rounded-xl w-40 h-28 flex flex-col justify-center order-1 sm:order-1">
+                <div className="bg-slate-900/80 border border-slate-700 p-4 rounded-xl w-40 h-28 flex flex-col justify-center order-1">
                   <span className="text-2xl">🥈</span>
-                  <p className="text-xs text-slate-300 font-bold truncate mt-1">{lastWeekPodium[1].email}</p>
+                  <p className="text-xs text-slate-300 font-bold truncate mt-1">{lastWeekPodium[1].name}</p>
                   <p className="text-sm font-black text-slate-400">{lastWeekPodium[1].points} Puan</p>
                 </div>
               )}
-              {/* 1. Sıra (Zirve) */}
               {lastWeekPodium[0] && (
-                <div className="bg-slate-900 border-2 border-amber-500 p-4 rounded-xl w-44 h-36 flex flex-col justify-center shadow-lg shadow-amber-500/5 order-2 sm:order-2">
+                <div className="bg-slate-900 border-2 border-amber-500 p-4 rounded-xl w-44 h-36 flex flex-col justify-center shadow-lg order-2">
                   <span className="text-3xl animate-bounce">🥇</span>
-                  <p className="text-sm text-amber-400 font-black truncate mt-1">{lastWeekPodium[0].email}</p>
+                  <p className="text-sm text-amber-400 font-black truncate mt-1">{lastWeekPodium[0].name}</p>
                   <p className="text-lg font-black text-white">{lastWeekPodium[0].points} Puan</p>
                 </div>
               )}
-              {/* 3. Sıra */}
               {lastWeekPodium[2] && (
-                <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-xl w-40 h-24 flex flex-col justify-center order-3 sm:order-3">
+                <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-xl w-40 h-24 flex flex-col justify-center order-3">
                   <span className="text-xl">🥉</span>
-                  <p className="text-xs text-slate-400 font-bold truncate mt-1">{lastWeekPodium[2].email}</p>
+                  <p className="text-xs text-slate-400 font-bold truncate mt-1">{lastWeekPodium[2].name}</p>
                   <p className="text-xs font-black text-amber-700">{lastWeekPodium[2].points} Puan</p>
                 </div>
               )}
@@ -257,10 +299,33 @@ export default function Home() {
         {/* ANA İÇERİK GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* SOL PANEL: VERİ GİRİŞİ & GEÇMİŞ */}
+          {/* SOL PANEL */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* GİRİŞ PANELİ */}
+            {/* 🛠️ YENİ EKLENEN PROFİL ADI GÜNCELLEME KUTUSU */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-3">Profil Ayarları</h3>
+              <form onSubmit={handleUpdateName} className="flex gap-3">
+                <input 
+                  type="text" 
+                  placeholder="Görünmesini istediğin ad soyad" 
+                  value={displayName} 
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  maxLength={25}
+                  required
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-emerald-500"
+                />
+                <button 
+                  type="submit" 
+                  disabled={isUpdatingName}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-5 rounded-xl text-sm transition-all border border-slate-700"
+                >
+                  {isUpdatingName ? "Kaydediliyor..." : "İsmi Güncelle"}
+                </button>
+              </form>
+            </div>
+
+            {/* ANTRENMAN GİRİŞ PANELİ */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
               <div className="mb-6">
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">TÜM ZAMANLAR KİŞİSEL SKORUN</p>
@@ -279,9 +344,7 @@ export default function Home() {
 
                   <input
                     type="number" 
-                    placeholder={
-                      type.includes("Antrenman") ? "Katılım Adedi (Örn: 1)" : "Süre (Dakika Olarak)"
-                    } 
+                    placeholder={type.includes("Antrenman") ? "Katılım Adedi (Örn: 1)" : "Süre (Dakika Olarak)"} 
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     className="sm:col-span-4 bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm focus:outline-none"
@@ -289,16 +352,13 @@ export default function Home() {
 
                   <button onClick={addWorkout} className="sm:col-span-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold p-3 rounded-xl transition-all text-sm">Kaydet</button>
                 </div>
-                <p className="text-[11px] text-slate-500 italic">
-                  *Not: Antrenmanlar için adet, Disk ve Kondisyon için **dakika** giriniz (Örn: 1 saat için 60 yazın).
-                </p>
               </div>
             </div>
 
             {/* GEÇMİŞ */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
               <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Senin Tüm Kayıtların</h3>
-              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
                 {workouts.map((w) => (
                   <div key={w.id} className="bg-slate-950/60 border border-slate-800 p-4 rounded-xl flex justify-between items-center group">
                     <div>
@@ -326,21 +386,15 @@ export default function Home() {
               </div>
 
               <div className="space-y-2">
-                {currentLeaderboard.map((player, index) => {
-                  const isMe = player.email === user.email;
-                  return (
-                    <div key={index} className={`flex justify-between items-center p-3 rounded-xl border ${isMe ? "bg-emerald-950/20 border-emerald-500/40" : "bg-slate-950/40 border-slate-800/60"}`}>
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="w-6 h-6 text-xs font-bold bg-slate-800 rounded flex items-center justify-center text-slate-400 shrink-0">{index + 1}</span>
-                        <span className={`text-sm truncate ${isMe ? "text-emerald-400 font-bold" : "text-slate-300"}`}>{player.email}</span>
-                      </div>
-                      <span className="text-sm font-black text-white">{player.points} <span className="text-[10px] font-normal text-slate-500">P</span></span>
+                {currentLeaderboard.map((player, index) => (
+                  <div key={index} className={`flex justify-between items-center p-3 rounded-xl border ${player.isMe ? "bg-emerald-950/20 border-emerald-500/40" : "bg-slate-950/40 border-slate-800/60"}`}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-6 h-6 text-xs font-bold bg-slate-800 rounded flex items-center justify-center text-slate-400 shrink-0">{index + 1}</span>
+                      <span className={`text-sm truncate ${player.isMe ? "text-emerald-400 font-bold" : "text-slate-300"}`}>{player.name}</span>
                     </div>
-                  );
-                })}
-                {currentLeaderboard.length === 0 && (
-                  <p className="text-xs text-slate-500 text-center py-4">Bu hafta henüz kimse antrenman girmedi. İlk sen ol!</p>
-                )}
+                    <span className="text-sm font-black text-white">{player.points} <span className="text-[10px] font-normal text-slate-500">P</span></span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
