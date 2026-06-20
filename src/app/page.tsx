@@ -549,34 +549,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* SÜTUN 2: CANLI TAKIM AKTİVİTE DUVARI (Mobilde sadece 'stats' sekmesinde açık) */}
-          <div className={`lg:col-span-4 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl h-full flex flex-col">
-              <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-1.5">
-                <span className="animate-pulse w-2 h-2 rounded-full bg-cyan-400 inline-block"></span>
-                🔥 TAKIM AKTİVİTE DUVARI (CANLI)
-              </h3>
-              <div className="space-y-2.5 flex-1 overflow-y-auto max-h-[460px] pr-1 text-xs">
-                {activityFeed.map((act, idx) => (
-                  <div key={idx} className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl space-y-1">
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="font-bold text-slate-200 truncate">{act.player_name}</span>
-                      <span className={`font-black shrink-0 px-1.5 py-0.5 rounded text-[10px] ${act.points >= 0 ? "text-emerald-400 bg-emerald-950/50" : "text-red-400 bg-red-950/50"}`}>
-                        {act.points >= 0 ? `+${act.points}` : act.points} P
-                      </span>
-                    </div>
-                    <p className="text-slate-400 text-[11px] italic">
-                      {act.type.includes("🏆") || act.type.includes("❌") ? "" : `🏃‍♂️ ${act.amount} ${act.type.includes("Antrenman") ? "Kez" : "Dk"} `}
-                      {act.type}
-                    </p>
-                  </div>
-                ))}
-                {activityFeed.length === 0 && <p className="text-slate-600 text-center py-10">Henüz hiçbir aktivite yok.</p>}
-              </div>
-            </div>
-          </div>
-
-          {/* SÜTUN 3: BU HAFTANIN YARIŞI VE ROZET VİTRİNİ (Mobilde sadece 'stats' sekmesinde açık) */}
+          {/* SÜTUN 2: BU HAFTANIN YARIŞI VE ROZET VİTRİNİ (Mobilde sadece 'stats' sekmesinde açık) */}
           <div className={`lg:col-span-4 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl sticky top-8">
               <div className="text-center mb-5 pb-3 border-b border-slate-800">
@@ -608,6 +581,35 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {/* SÜTUN 3: CANLI TAKIM AKTİVİTE DUVARI (Mobilde sadece 'stats' sekmesinde açık) */}
+          <div className={`lg:col-span-4 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl h-full flex flex-col">
+              <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-1.5">
+                <span className="animate-pulse w-2 h-2 rounded-full bg-cyan-400 inline-block"></span>
+                🔥 TAKIM AKTİVİTE DUVARI (CANLI)
+              </h3>
+              <div className="space-y-2.5 flex-1 overflow-y-auto max-h-[460px] pr-1 text-xs">
+                {activityFeed.map((act, idx) => (
+                  <div key={idx} className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl space-y-1">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="font-bold text-slate-200 truncate">{act.player_name}</span>
+                      <span className={`font-black shrink-0 px-1.5 py-0.5 rounded text-[10px] ${act.points >= 0 ? "text-emerald-400 bg-emerald-950/50" : "text-red-400 bg-red-950/50"}`}>
+                        {act.points >= 0 ? `+${act.points}` : act.points} P
+                      </span>
+                    </div>
+                    <p className="text-slate-400 text-[11px] italic">
+                      {act.type.includes("🏆") || act.type.includes("❌") ? "" : `🏃‍♂️ ${act.amount} ${act.type.includes("Antrenman") ? "Kez" : "Dk"} `}
+                      {act.type}
+                    </p>
+                  </div>
+                ))}
+                {activityFeed.length === 0 && <p className="text-slate-600 text-center py-10">Henüz hiçbir aktivite yok.</p>}
+              </div>
+            </div>
+          </div>
+
+          
 
         </div>
 
