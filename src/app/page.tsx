@@ -138,12 +138,15 @@ export default function Home() {
       // Geriye kalan her şey otomatik olarak arşive gider
       setPlaybookArchive(data.slice(1) as PlaybookContent[]);
 
-      // Kaptan paneline kolaylık olsun diye son verileri doldur
+      // Kaptan paneline kolaylık olsun diye form alanlarını sıfırla
       setPWeekTitle("");
       setPWeekNotes("");
       setPUltiplaysUrl("");
       setPYoutubeUrl("");
-      setPFileUrl("");
+      pFileUrl("");
+    } else {
+      setCurrentPlaybook(null);
+      setPlaybookArchive([]);
     }
   };
 
@@ -167,6 +170,23 @@ export default function Home() {
       alert("Kaptanım, yeni haftanın taktik playbook'u yayınlandı! Eski hafta otomatik olarak arşive kaldırıldı. 📖🚀");
       fetchPlaybookData();
       setActiveTab("playbook");
+    }
+  };
+
+  // 🗑️ Kaptanın Arşivden Taktik Silmesini Sağlayan Fonksiyon
+  const deletePlaybookItem = async (id: number) => {
+    if (!myProfile?.is_captain) return;
+    
+    const confirmDelete = window.confirm("Kaptanım, bu taktiği arşivden kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz! 🗑️");
+    if (!confirmDelete) return;
+
+    const { error } = await supabase.from("playbook").delete().eq("id", id);
+    
+    if (error) {
+      alert("Silme işlemi sırasında bir hata oluştu: " + error.message);
+    } else {
+      alert("Taktik arşivden başarıyla kaldırıldı. 🫡");
+      fetchPlaybookData(); // Listeyi canlı olarak yeniler
     }
   };
 
@@ -751,13 +771,26 @@ export default function Home() {
                       {playbookArchive.map((archiveItem) => (
                         <details key={archiveItem.id} className="group bg-slate-900 border border-slate-800 rounded-xl transition-all overflow-hidden">
                           <summary className="list-none flex items-center justify-between p-4 cursor-pointer hover:bg-slate-800/50 select-none">
-                            <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
                               <span className="text-base shrink-0 group-open:rotate-90 transition-transform text-slate-500">▶</span>
                               <span className="text-xs md:text-sm font-bold text-slate-200 truncate">{archiveItem.week_title}</span>
                             </div>
-                            <span className="text-[10px] font-medium text-slate-500 shrink-0 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
-                              {archiveItem.created_at ? new Date(archiveItem.created_at).toLocaleDateString("tr-TR") : "Eski"}
-                            </span>
+                            
+                            <div className="flex items-center gap-3 shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
+                              {/* 🗑️ Yalnızca Kaptanların Görebileceği Arşivden Silme Butonu */}
+                              {myProfile?.is_captain && archiveItem.id && (
+                                <button 
+                                  onClick={() => deletePlaybookItem(archiveItem.id!)}
+                                  className="text-[10px] font-bold text-red-400 bg-red-950/40 border border-red-900/60 hover:bg-red-500 hover:text-slate-950 px-2 py-1 rounded-md transition-all animate-fade-in"
+                                >
+                                  🗑️ Sil
+                                </button>
+                              )}
+
+                              <span className="text-[10px] font-medium text-slate-500 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
+                                {archiveItem.created_at ? new Date(archiveItem.created_at).toLocaleDateString("tr-TR") : "Eski"}
+                              </span>
+                            </div>
                           </summary>
                           
                           <div className="p-4 bg-slate-950 border-t border-slate-800 text-xs space-y-4">
