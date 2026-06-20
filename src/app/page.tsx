@@ -38,20 +38,21 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
 
+  // Mobil Sekme Yönetimi ('home', 'challenges', 'stats')
+  const [activeTab, setActiveTab] = useState<"home" | "challenges" | "stats">("home");
+
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [type, setType] = useState("Kum Antrenmanı");
   const [amount, setAmount] = useState("");
   const [currentLeaderboard, setCurrentLeaderboard] = useState<any[]>([]);
   const [lastWeekPodium, setLastWeekPodium] = useState<any[]>([]);
 
-  // Profil, Oyuncular & Aktivite Duvarı
   const [displayName, setDisplayName] = useState("");
   const [isUpdatingName, setIsUpdatingName] = useState(false);
   const [allPlayers, setAllPlayers] = useState<{ id: string; display_name: string }[]>([]);
   const [activityFeed, setActivityFeed] = useState<Workout[]>([]);
   const [playerProfiles, setPlayerProfiles] = useState<{ [key: string]: PlayerProfile }>({});
 
-  // Challenge State'leri
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [targetReceiverId, setTargetReceiverId] = useState("");
   const [challengeType, setChallengeType] = useState("Kum Antrenmanı");
@@ -108,19 +109,17 @@ export default function Home() {
     }
   };
 
-  // 📝 ANTRENMAN PUAN HESAPLAMA MOTORU (RECOVERY DAHİL)
   const calculatePoints = (workoutType: string, amt: number) => {
     switch (workoutType) {
       case "Kum Antrenmanı": return amt * 10; 
       case "Başka Takımla Antrenman": return amt * 6;  
       case "Disk Atma (Throwing)": return Math.floor(amt / 30) * 4; 
       case "Kondisyon (Gym/Yüzme/Koşu vs.)": return Math.floor(amt / 30) * 3; 
-      case "Aktif Dinlenme (Esnetme/Recovery)": return Math.floor(amt / 30) * 1; // 30 dk = 1 Puan
+      case "Aktif Dinlenme (Esnetme/Recovery)": return Math.floor(amt / 30) * 1; 
       default: return 0;
     }
   };
 
-  // ⏰ 48 SAAT DEADLINE & OTOMATİK CEZA KONTROLÜ
   const checkExpiredChallenges = async () => {
     const { data: activeChallenges } = await supabase.from("challenges").select("*").eq("status", "Beklemede");
     if (!activeChallenges) return;
@@ -188,7 +187,6 @@ export default function Home() {
     }
   };
 
-  // 🎯 CHALLENGE BAŞARIYLA TAMAMLANDI (ANA PUAN + 2 BONUS + ROZET KONTROLÜ)
   const completeChallenge = async (c: Challenge) => {
     const { error: cError } = await supabase.from("challenges").update({ status: "Tamamlandı" }).eq("id", c.id);
     if (cError) return;
@@ -204,7 +202,6 @@ export default function Home() {
       user_id: c.receiver_id
     }]);
 
-    // 🎯 DÜELLO AVCISI ROZET KONTROLÜ (Üst üste 3 başarı)
     const { data: myDoneChallenges } = await supabase.from("challenges")
       .select("status")
       .eq("receiver_id", c.receiver_id)
@@ -239,13 +236,11 @@ export default function Home() {
     if (data) setWorkouts(data);
   };
 
-  // LİDERLİK, AKTİVİTE DUVARI, ROZETLER VE SAYAÇLARIN KONTROLÜ
   const fetchLeaderboards = async () => {
     if (!user) return;
     const { data: workoutsData } = await supabase.from("workouts").select("*").order("created_at", { ascending: false });
     const { data: profilesData } = await supabase.from("profiles").select("*");
     const { data: badgesData } = await supabase.from("badges").select("*");
-    const { data: attendanceData } = await supabase.from("weekly_attendance").select("*");
 
     if (profilesData) {
       setAllPlayers(profilesData.filter(p => p.id !== user.id));
@@ -260,7 +255,6 @@ export default function Home() {
         };
       });
 
-      // Kalıcı Rozetleri Eşleştir
       if (badgesData) {
         badgesData.forEach(b => {
           if (profileMap[b.user_id]) profileMap[b.user_id].badges.push(b.badge_type);
@@ -288,7 +282,6 @@ export default function Home() {
           }
         });
 
-        // Geçen Haftanın Podyumuna Geçici Kürsü Rozetlerini Ata
         const sortedLastWeek = Object.keys(lastWeekMap).map((uid) => ({
           id: uid,
           name: profileMap[uid]?.display_name || `Oyuncu`,
@@ -301,9 +294,7 @@ export default function Home() {
         if (sortedLastWeek[1] && profileMap[sortedLastWeek[1].id]) profileMap[sortedLastWeek[1].id].badges.push("🥈 Podyum");
         if (sortedLastWeek[2] && profileMap[sortedLastWeek[2].id]) profileMap[sortedLastWeek[2].id].badges.push("🥉 Podyum");
 
-        // İstikrar Serisi ve Akıllı Sayaç Hesaplama
         const currentWeekAttendance: { [key: string]: Set<string> } = {};
-        const heavyAttendanceDays: { [key: string]: Set<string> } = {};
         const recoveryCountMap: { [key: string]: number } = {};
 
         workoutsData.forEach(w => {
@@ -313,12 +304,6 @@ export default function Home() {
           if (wDate >= currentMonday) {
             if (!currentWeekAttendance[w.user_id]) currentWeekAttendance[w.user_id] = new Set();
             currentWeekAttendance[w.user_id].add(dayName);
-
-            const isHeavy = !w.type.includes("Recovery");
-            if (isHeavy) {
-              if (!heavyAttendanceDays[w.user_id]) heavyAttendanceDays[w.user_id] = new Set();
-              heavyAttendanceDays[w.user_id].add(dayName);
-            }
           }
 
           if (w.type.includes("Recovery")) {
@@ -326,7 +311,6 @@ export default function Home() {
           }
         });
 
-        // 🧘‍♂️ RECOVERY USTASI ROZET KONTROLÜ
         Object.keys(recoveryCountMap).forEach(async (uid) => {
           if (recoveryCountMap[uid] >= 8) {
             const hasBadge = profileMap[uid]?.badges.includes("🧘‍♂️ Recovery Ustası");
@@ -336,11 +320,8 @@ export default function Home() {
           }
         });
 
-        // 🦾 İSTİKRAR ABİDESİ ROZET & SEYAÇ GÜNCELLEME (Haftada 4 gün barajı)
         Object.keys(currentWeekAttendance).forEach(async (uid) => {
           if (currentWeekAttendance[uid].size >= 4) {
-            // Eğer veritabanında bu hafta için sayaç tetiklenmediyse haftasını 1 artırabiliriz
-            // Basitleştirmek adına UI üzerinde koşullu gösteriyoruz ve kalıcı rozet veriyoruz.
             if (profileMap[uid] && profileMap[uid].streak_weeks >= 4) {
               const hasBadge = profileMap[uid]?.badges.includes("🦾 İstikrar Abidesi");
               if (!hasBadge) {
@@ -377,7 +358,6 @@ export default function Home() {
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
-  // 🛡️ AKILLI FREN SİSTEMLİ YENİ ANTRENMAN EKLEME FONKSİYONU
   const addWorkout = async () => {
     if (!user) return;
     const numericAmount = Number(amount);
@@ -389,7 +369,6 @@ export default function Home() {
 
     const isHeavy = !type.includes("Recovery");
 
-    // 1. Ağır Antrenmanlar için 5 gün sınırını denetle
     if (isHeavy) {
       const { data: att } = await supabase.from("weekly_attendance")
         .select("workout_day")
@@ -405,12 +384,10 @@ export default function Home() {
       }
     }
 
-    // 2. Sınırı geçmediyse kaydet
     let points = calculatePoints(type, numericAmount);
     const { data } = await supabase.from("workouts").insert([{ type, amount: numericAmount, points, user_id: user.id }]).select();
     
     if (data) {
-      // Devamlılık tablosuna günü işle
       await supabase.from("weekly_attendance").insert([{
         user_id: user.id,
         workout_day: todayName,
@@ -448,58 +425,59 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans pb-24 md:pb-8">
       <div className="max-w-7xl mx-auto space-y-6">
         
         {/* HEADER */}
-        <header className="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+        <header className="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-4 flex flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
-            <span className="text-3xl">🥏</span>
+            <span className="text-2xl md:text-3xl">🥏</span>
             <div>
-              <h1 className="text-xl font-extrabold text-white">FRİZBİ HUB</h1>
-              <p className="text-xs text-slate-400">Oyuncu Paneli</p>
+              <h1 className="text-base md:text-xl font-extrabold text-white">FRİZBİ HUB</h1>
+              <p className="text-[10px] md:text-xs text-slate-400">Oyuncu Paneli</p>
             </div>
           </div>
-          <button onClick={handleLogout} className="bg-slate-800 text-slate-300 px-4 py-2 rounded-xl text-sm">Çıkış Yap</button>
+          <button onClick={handleLogout} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl text-xs md:text-sm transition-all">Çıkış</button>
         </header>
 
-        {/* KÜRSÜ */}
-        {lastWeekPodium.length > 0 && (
-          <div className="bg-gradient-to-r from-amber-500/10 via-slate-900 to-cyan-500/10 border border-slate-800 rounded-2xl p-6 text-center">
-            <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-4">🏆 GEÇEN HAFTANIN EN İYİLERİ (KÜRSÜ)</h3>
-            <div className="flex flex-wrap justify-center items-end gap-4 pt-2">
-              {lastWeekPodium[1] && <div className="bg-slate-900/80 border border-slate-700 p-4 rounded-xl w-40 h-28 flex flex-col justify-center order-1"><span>🥈</span><p className="text-xs font-bold truncate">{lastWeekPodium[1].name}</p><p className="text-sm text-slate-400">{lastWeekPodium[1].points} P</p></div>}
-              {lastWeekPodium[0] && <div className="bg-slate-900 border-2 border-amber-500 p-4 rounded-xl w-44 h-36 flex flex-col justify-center order-2"><span className="animate-bounce">👑</span><p className="text-sm text-amber-400 font-black truncate">{lastWeekPodium[0].name}</p><p className="text-lg text-white font-black">{lastWeekPodium[0].points} P</p></div>}
-              {lastWeekPodium[2] && <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-xl w-40 h-24 flex flex-col justify-center order-3"><span>🥉</span><p className="text-xs font-bold truncate">{lastWeekPodium[2].name}</p><p className="text-xs text-amber-700">{lastWeekPodium[2].points} P</p></div>}
+        {/* KÜRSÜ (Masaüstünde hep görünür, mobilde sadece Ana Sayfa sekmesinde) */}
+        {lastWeekPodium.length > 0 && (activeTab === "home") && (
+          <div className="bg-gradient-to-r from-amber-500/10 via-slate-900 to-cyan-500/10 border border-slate-800 rounded-2xl p-4 md:p-6 text-center">
+            <h3 className="text-[10px] md:text-xs font-bold text-amber-400 uppercase tracking-widest mb-4">🏆 GEÇEN HAFTANIN EN İYİLERİ (KÜRSÜ)</h3>
+            <div className="flex justify-center items-end gap-2 md:gap-4 pt-2">
+              {lastWeekPodium[1] && <div className="bg-slate-900/80 border border-slate-700 p-3 rounded-xl w-28 md:w-40 h-24 md:h-28 flex flex-col justify-center order-1 text-xs"><span className="text-sm md:text-base">🥈</span><p className="font-bold truncate">{lastWeekPodium[1].name}</p><p className="text-slate-400 text-[11px] md:text-sm">{lastWeekPodium[1].points} P</p></div>}
+              {lastWeekPodium[0] && <div className="bg-slate-900 border-2 border-amber-500 p-3 rounded-xl w-32 md:w-44 h-30 md:h-36 flex flex-col justify-center order-2 text-xs md:text-sm"><span className="animate-bounce text-base md:text-xl">👑</span><p className="text-amber-400 font-black truncate">{lastWeekPodium[0].name}</p><p className="text-white font-black text-sm md:text-lg">{lastWeekPodium[0].points} P</p></div>}
+              {lastWeekPodium[2] && <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-xl w-28 md:w-40 h-20 md:h-24 flex flex-col justify-center order-3 text-xs"><span className="text-sm md:text-base">🥉</span><p className="font-bold truncate">{lastWeekPodium[2].name}</p><p className="text-amber-700 text-[11px] md:text-xs">{lastWeekPodium[2].points} P</p></div>}
             </div>
           </div>
         )}
 
-        {/* DÜELLO (CHALLENGE) MERKEZİ */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <h3 className="text-sm font-bold text-red-400 uppercase tracking-widest mb-4">⚔️ DÜELLO TEKLİF ET</h3>
+        {/* ⚔️ DÜELLO ALANI (Masaüstünde açık, Mobilde sekme kontrolünde) */}
+        <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${activeTab === "challenges" ? "block" : "hidden md:grid"}`}>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl">
+            <h3 className="text-xs md:text-sm font-bold text-red-400 uppercase tracking-widest mb-4">⚔️ DÜELLO TEKLİF ET</h3>
             <form onSubmit={sendChallenge} className="space-y-3">
-              <select value={targetReceiverId} onChange={(e) => setTargetReceiverId(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none">
+              <select value={targetReceiverId} onChange={(e) => setTargetReceiverId(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:text-sm text-white focus:outline-none">
                 <option value="">Kime Meydan Okuyorsun?</option>
                 {allPlayers.map(p => <option key={p.id} value={p.id}>{p.display_name}</option>)}
               </select>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <select value={challengeType} onChange={(e) => setChallengeType(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none">
+                <select value={challengeType} onChange={(e) => setChallengeType(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none">
                   <option>Kum Antrenmanı</option>
                   <option>Başka Takımla Antrenman</option>
                   <option>Disk Atma (Throwing)</option>
                   <option>Kondisyon (Gym/Yüzme/Koşu vs.)</option>
+                  <option>Aktif Dinlenme (Esnetme/Recovery)</option>
                 </select>
-                <input type="number" placeholder={challengeType.includes("Antrenman") ? "Katılım Adedi" : "Süre (Dakika)"} value={challengeAmount} onChange={(e) => setChallengeAmount(e.target.value)} required className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none" />
+                <input type="number" placeholder={challengeType.includes("Antrenman") ? "Katılım Adedi" : "Süre (Dakika)"} value={challengeAmount} onChange={(e) => setChallengeAmount(e.target.value)} required className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none" />
               </div>
-              <button type="submit" className="w-full bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold p-3 rounded-xl text-sm transition-all">Meydan Okumayı Ateşle (48 Saat Süre! 🔥)</button>
-              <p className="text-[11px] text-slate-500 text-center">Başarana: Normal Puan + 2 Bonus Puan | Başaramayana: -3 Puan Ceza</p>
+              <button type="submit" className="w-full bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold p-3 rounded-xl text-xs md:text-sm transition-all">Meydan Okumayı Ateşle (48 Saat Süre! 🔥)</button>
+              <p className="text-[10px] text-slate-500 text-center">Başarana: Normal Puan + 2 Bonus | Başaramayana: -3 Puan Ceza</p>
             </form>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">🛡️ TAKIMDAKİ DÜELLOLAR</h3>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl">
+            <h3 className="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">🛡️ TAKIMDAKİ DÜELLOLAR</h3>
             <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1">
               {challenges.map(c => {
                 const isReceived = c.receiver_id === user.id && c.status === "Beklemede";
@@ -521,11 +499,11 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ANA KISIM 3 SÜTUN GRID */}
+        {/* ANA RESPONSIVE GRID SISTEMI */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* SÜTUN 1: ANTRENMAN GİRİŞ VE PROFİL */}
-          <div className="lg:col-span-4 space-y-6">
+          {/* SÜTUN 1: PROFİL VE ANTRENMAN İŞLEME (Mobilde sadece 'home' sekmesinde açık) */}
+          <div className={`lg:col-span-4 space-y-6 ${activeTab === "home" ? "block" : "hidden lg:block"}`}>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Profil Ayarları</h3>
               <form onSubmit={handleUpdateName} className="flex gap-2">
@@ -571,8 +549,8 @@ export default function Home() {
             </div>
           </div>
 
-          {/* SÜTUN 2: CANLI TAKIM AKTİVİTE DUVARI */}
-          <div className="lg:col-span-4">
+          {/* SÜTUN 2: CANLI TAKIM AKTİVİTE DUVARI (Mobilde sadece 'stats' sekmesinde açık) */}
+          <div className={`lg:col-span-4 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl h-full flex flex-col">
               <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-1.5">
                 <span className="animate-pulse w-2 h-2 rounded-full bg-cyan-400 inline-block"></span>
@@ -598,8 +576,8 @@ export default function Home() {
             </div>
           </div>
 
-          {/* SÜTUN 3: BU HAFTANIN YARIŞI VE ROZET VİTRİNİ */}
-          <div className="lg:col-span-4">
+          {/* SÜTUN 3: BU HAFTANIN YARIŞI VE ROZET VİTRİNİ (Mobilde sadece 'stats' sekmesinde açık) */}
+          <div className={`lg:col-span-4 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl sticky top-8">
               <div className="text-center mb-5 pb-3 border-b border-slate-800">
                 <span className="text-2xl block mb-0.5">⚡</span>
@@ -616,7 +594,6 @@ export default function Home() {
                       </div>
                       <span className="font-black text-white">{player.points} <span className="text-[9px] font-normal text-slate-500">P</span></span>
                     </div>
-                    {/* Oyuncunun kazandığı Rozetleri gösterdiğimiz yeni alan */}
                     {player.badges && player.badges.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2 pt-1.5 border-t border-slate-800/40">
                         {player.badges.map((b: string, bIdx: number) => (
@@ -634,6 +611,24 @@ export default function Home() {
 
         </div>
 
+      </div>
+
+      {/* 📱 SABİT MOBİL ALT MENÜ (NAVIGATION BAR) - Sadece küçük ekranlarda görünür */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur border-t border-slate-800 px-6 py-2 flex justify-around items-center z-50 shadow-2xl">
+        <button onClick={() => setActiveTab("home")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "home" ? "text-emerald-400 font-bold" : "text-slate-400"}`}>
+          <span className="text-xl">🏠</span>
+          <span className="text-[10px]">Ana Sayfa</span>
+        </button>
+        
+        <button onClick={() => setActiveTab("challenges")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "challenges" ? "text-red-400 font-bold" : "text-slate-400"}`}>
+          <span className="text-xl">⚔️</span>
+          <span className="text-[10px]">Düellolar</span>
+        </button>
+        
+        <button onClick={() => setActiveTab("stats")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "stats" ? "text-cyan-400 font-bold" : "text-slate-400"}`}>
+          <span className="text-xl">📈</span>
+          <span className="text-[10px]">Sıralama</span>
+        </button>
       </div>
     </main>
   );
