@@ -51,7 +51,6 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
 
-  // 📖 "playbook" sekmesini hem mobile hem masaüstüne ekledik
   const [activeTab, setActiveTab] = useState<"home" | "challenges" | "stats" | "playbook" | "captain">("home");
 
   const [workouts, setWorkouts] = useState<Workout[]>([]);
@@ -73,8 +72,9 @@ export default function Home() {
   const [challengeAmount, setChallengeAmount] = useState("");
   const [customChallengeTitle, setCustomChallengeTitle] = useState("");
 
-  // 📖 Playbook State'leri
+  // 📖 Playbook ve Otomatik Arşiv State'leri
   const [currentPlaybook, setCurrentPlaybook] = useState<PlaybookContent | null>(null);
+  const [playbookArchive, setPlaybookArchive] = useState<PlaybookContent[]>([]);
   const [pWeekTitle, setPWeekTitle] = useState("");
   const [pWeekNotes, setPWeekNotes] = useState("");
   const [pUltiplaysUrl, setPUltiplaysUrl] = useState("");
@@ -106,6 +106,7 @@ export default function Home() {
       setActivityFeed([]);
       setMyProfile(null);
       setCurrentPlaybook(null);
+      setPlaybookArchive([]);
     }
   }, [user]);
 
@@ -115,7 +116,7 @@ export default function Home() {
     await fetchChallenges();
     await fetchWorkouts();
     await fetchLeaderboards();
-    await fetchLatestPlaybook();
+    await fetchPlaybookData();
   };
 
   const fetchMyProfile = async () => {
@@ -127,21 +128,25 @@ export default function Home() {
     }
   };
 
-  // 📖 Son yüklenen playbook taktiğini getir
-  const fetchLatestPlaybook = async () => {
-    const { data, error } = await supabase.from("playbook").select("*").order("id", { ascending: false }).limit(1);
+  // 📖 Playbook ve Arşiv Verilerini Otomatik Ayrıştırarak Çeken Fonksiyon
+  const fetchPlaybookData = async () => {
+    const { data, error } = await supabase.from("playbook").select("*").order("id", { ascending: false });
     if (data && data.length > 0) {
+      // En son yüklenen aktif hafta
       setCurrentPlaybook(data[0] as PlaybookContent);
-      // Kaptan paneline mevcut bilgileri önceden dolduralım doldurmak kolay olsun diye
-      setPWeekTitle(data[0].week_title || "");
-      setPWeekNotes(data[0].week_notes || "");
-      setPUltiplaysUrl(data[0].ultiplays_url || "");
-      setPYoutubeUrl(data[0].youtube_url || "");
-      setPFileUrl(data[0].file_url || "");
+      
+      // Geriye kalan her şey otomatik olarak arşive gider
+      setPlaybookArchive(data.slice(1) as PlaybookContent[]);
+
+      // Kaptan paneline kolaylık olsun diye son verileri doldur
+      setPWeekTitle("");
+      setPWeekNotes("");
+      setPUltiplaysUrl("");
+      setPYoutubeUrl("");
+      setPFileUrl("");
     }
   };
 
-  // 📖 Kaptan için yeni Playbook yayınlama fonksiyonu
   const handleSavePlaybook = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!myProfile?.is_captain) return;
@@ -159,13 +164,12 @@ export default function Home() {
     if (error) {
       alert("Playbook yüklenirken hata oluştu: " + error.message);
     } else {
-      alert("Kaptanım, yeni haftanın taktik playbook'u tüm takıma başarıyla duyuruldu! 📖🚀");
-      fetchLatestPlaybook();
+      alert("Kaptanım, yeni haftanın taktik playbook'u yayınlandı! Eski hafta otomatik olarak arşive kaldırıldı. 📖🚀");
+      fetchPlaybookData();
       setActiveTab("playbook");
     }
   };
 
-  // YouTube Linkini Embed Formatına Çeviren Akıllı Yardımcı Fonksiyon
   const formatYoutubeEmbed = (url: string) => {
     if (!url) return "";
     if (url.includes("embed/")) return url;
@@ -569,7 +573,6 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Masaüstü Üst Menü Linkleri */}
             <div className="hidden md:flex items-center gap-2 mr-2">
               <button onClick={() => setActiveTab("home")} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${activeTab === "home" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"}`}>Ana Sayfa</button>
               <button onClick={() => setActiveTab("playbook")} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${activeTab === "playbook" ? "bg-cyan-950 text-cyan-400 border border-cyan-800" : "text-slate-400 hover:text-white"}`}>📖 Playbook</button>
@@ -617,114 +620,182 @@ export default function Home() {
             <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl p-6 shadow-2xl">
               <div className="border-b border-slate-800 pb-3 mb-4">
                 <h2 className="text-lg font-black text-cyan-400 flex items-center gap-2">📖 HAFTALIK TAKTİK & PLAYBOOK YAYINLA</h2>
-                <p className="text-xs text-slate-400 mt-1">Buraya girdiğin taktik notları, Ultiplays animasyonları ve videolar anında tüm takımın telefonundaki Playbook sekmesine düşer.</p>
+                <p className="text-xs text-slate-400 mt-1">Yeni veri girdiğinde mevcut hafta otomatik olarak aşağıdaki "Arşiv" alanına kayar.</p>
               </div>
               <form onSubmit={handleSavePlaybook} className="space-y-4 text-xs">
                 <div>
                   <label className="block text-slate-300 font-bold mb-1">Hafta Başlığı</label>
-                  <input type="text" placeholder="Örn: 3. Hafta: Zone Savunma ve Cup Yerleşim Mantığı" value={pWeekTitle} onChange={(e) => setPWeekTitle(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
+                  <input type="text" placeholder="Örn: 4. Hafta: Endzone Isolate ve Hücum Setleri" value={pWeekTitle} onChange={(e) => setPWeekTitle(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-slate-300 font-bold mb-1">🎯 Haftanın Odak Noktaları ve Antrenman Notları</label>
-                  <textarea rows={5} placeholder="Bu hafta antrenmanda tam olarak neye odaklanacağız? Adım adım detayları yazın..." value={pWeekNotes} onChange={(e) => setPWeekNotes(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none leading-relaxed" />
+                  <textarea rows={4} placeholder="Bu hafta sahada tam olarak neyi oturtacağız? Detaylıca yaz kaptan..." value={pWeekNotes} onChange={(e) => setPWeekNotes(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none leading-relaxed" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-slate-300 font-bold mb-1">Ultiplays Paylaşım/Embed Linki</label>
-                    <input type="url" placeholder="https://ultiplays.com/playbook/..." value={pUltiplaysUrl} onChange={(e) => setPUltiplaysUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
+                    <label className="block text-slate-300 font-bold mb-1">Ultiplays Embed/Sadece URL Linki</label>
+                    <input type="url" placeholder="https://www.ultiplays.com/embed/..." value={pUltiplaysUrl} onChange={(e) => setPUltiplaysUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
                   </div>
                   <div>
-                    <label className="block text-slate-300 font-bold mb-1">YouTube Video Linki (Opsiyonel)</label>
+                    <label className="block text-slate-300 font-bold mb-1">YouTube Analiz Linki (Opsiyonel)</label>
                     <input type="url" placeholder="https://www.youtube.com/watch?v=..." value={pYoutubeUrl} onChange={(e) => setPYoutubeUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
                   </div>
                   <div>
-                    <label className="block text-slate-300 font-bold mb-1">Ek Dosya / PDF / Fotoğraf Linki (Opsiyonel)</label>
-                    <input type="url" placeholder="Bulut veya Drive dosya linki" value={pFileUrl} onChange={(e) => setPFileUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
+                    <label className="block text-slate-300 font-bold mb-1">Ek Dosya / Drive / PDF (Opsiyonel)</label>
+                    <input type="url" placeholder="Drive veya Bulut linki" value={pFileUrl} onChange={(e) => setPFileUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
                   </div>
                 </div>
                 <div className="flex justify-end gap-3 pt-2">
                   <button type="button" onClick={() => setActiveTab("home")} className="bg-slate-800 text-slate-300 px-4 py-2 rounded-xl font-bold">İptal</button>
-                  <button type="submit" disabled={isSavingPlaybook} className="bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-black px-6 py-2 rounded-xl shadow-lg">{isSavingPlaybook ? "Yayınlanıyor..." : "Taktikleri Takıma Fırlat 🚀"}</button>
+                  <button type="submit" disabled={isSavingPlaybook} className="bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-black px-6 py-2 rounded-xl shadow-lg">{isSavingPlaybook ? "Yayınlanıyor..." : "Taktikleri Yayına Al 🚀"}</button>
                 </div>
               </form>
             </div>
           </div>
         )}
 
-        {/* 📖 YENİ PLAYBOOK GÖRÜNTÜLEME SEKME ALANI (RESPONSIVE) */}
+        {/* 📖 GÜNCEL PLAYBOOK VE OTOMATİK ARŞİV ALANI */}
         {activeTab === "playbook" && (
-          <div className="space-y-6">
+          <div className="space-y-10">
             {!currentPlaybook ? (
               <div className="bg-slate-900 border border-slate-800 p-12 text-center rounded-2xl">
                 <span className="text-4xl block mb-2">📖</span>
-                <p className="text-slate-400 text-sm">Kaptanınız henüz bu haftanın taktik playbook içeriklerini yüklemedi.</p>
+                <p className="text-slate-400 text-sm">Kaptan henüz taktik playbook girişi yapmadı.</p>
               </div>
             ) : (
-              <div>
-                {/* Masaüstü Düzeni (Yan Yana) */}
-                <div className="hidden lg:grid lg:grid-cols-12 gap-6">
-                  {/* Sol Taraf: Ultiplays Taktik Tahtası (Geniş Ekran) */}
-                  <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col h-[600px]">
-                    <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-3">🎬 ULTIPLAYS CANLI TAKTİK ANİMASYONU</h3>
-                    {currentPlaybook.ultiplays_url ? (
-                      <iframe src={currentPlaybook.ultiplays_url} className="w-full flex-1 rounded-xl bg-slate-950 border border-slate-800" allowFullScreen></iframe>
-                    ) : (
-                      <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center text-xs text-slate-600">Bu hafta için Ultiplays çizimi yüklenmedi.</div>
-                    )}
-                  </div>
-                  {/* Sağ Taraf: Notlar ve Diğer Maddeler */}
-                  <div className="lg:col-span-5 space-y-6 max-h-[600px] overflow-y-auto pr-1">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-                      <div className="border-b border-slate-800 pb-2">
-                        <span className="text-[10px] font-black tracking-widest text-emerald-400 uppercase">BU HAFTANIN ODAĞI</span>
-                        <h2 className="text-xl font-black text-white mt-1">{currentPlaybook.week_title}</h2>
-                      </div>
-                      <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{currentPlaybook.week_notes}</p>
+              <div className="space-y-12">
+                
+                {/* --- AKTİF GÜNCEL HAFTA ALANI --- */}
+                <div>
+                  <h2 className="text-sm font-black text-emerald-400 tracking-widest uppercase mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    🔥 BU HAFTANIN AKTİF PLANI
+                  </h2>
+
+                  {/* Masaüstü Aktif Taktik Düzeni */}
+                  <div className="hidden lg:grid lg:grid-cols-12 gap-6">
+                    <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col h-[560px]">
+                      <h3 className="text-[11px] font-bold text-cyan-400 uppercase tracking-widest mb-3">🎬 ULTIPLAYS TAKTİK TAHTASI</h3>
+                      {currentPlaybook.ultiplays_url ? (
+                        <iframe src={currentPlaybook.ultiplays_url} className="w-full flex-1 rounded-xl bg-slate-950 border border-slate-800" allowFullScreen></iframe>
+                      ) : (
+                        <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center text-xs text-slate-600">Ultiplays çizimi yüklenmedi.</div>
+                      )}
                     </div>
+                    
+                    <div className="lg:col-span-5 space-y-6 max-h-[560px] overflow-y-auto pr-1">
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                        <div className="border-b border-slate-800 pb-2">
+                          <span className="text-[9px] font-black tracking-widest text-emerald-400 uppercase">ODAK NOKTALARI</span>
+                          <h2 className="text-lg font-black text-white mt-1">{currentPlaybook.week_title}</h2>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{currentPlaybook.week_notes}</p>
+                      </div>
+                      {currentPlaybook.youtube_url && (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                          <h4 className="text-[11px] font-bold text-red-400 uppercase tracking-widest mb-3">📺 TAKTİK ANALİZ VİDEOSU</h4>
+                          <iframe src={formatYoutubeEmbed(currentPlaybook.youtube_url)} className="w-full aspect-video rounded-xl bg-slate-950" allowFullScreen></iframe>
+                        </div>
+                      )}
+                      {currentPlaybook.file_url && (
+                        <a href={currentPlaybook.file_url} target="_blank" rel="noreferrer" className="block bg-gradient-to-r from-cyan-950 to-slate-900 border border-cyan-800 hover:border-cyan-500 p-3.5 rounded-xl text-center text-xs font-bold text-cyan-400 transition-all">📂 Ek Taktik Dökümanını / PDF Aç</a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Mobil Aktif Taktik Düzeni (İstediğin Sıra: Odak ➔ Ultiplays ➔ Video) */}
+                  <div className="block lg:hidden space-y-4">
+                    {/* 1. Sıra: Odak Noktaları */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                      <div className="border-b border-slate-800 pb-2">
+                        <span className="text-[9px] font-black tracking-widest text-emerald-400 uppercase">ODAK NOKTALARIMIZ</span>
+                        <h2 className="text-base font-black text-white mt-0.5">{currentPlaybook.week_title}</h2>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{currentPlaybook.week_notes}</p>
+                    </div>
+
+                    {/* 2. Sıra: Ultiplays Taktik Ekranı */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2">
+                      <h3 className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest">🎬 ULTIPLAYS ANİMASYONU</h3>
+                      {currentPlaybook.ultiplays_url ? (
+                        <iframe src={currentPlaybook.ultiplays_url} className="w-full h-[300px] rounded-xl bg-slate-950 border border-slate-800" allowFullScreen></iframe>
+                      ) : (
+                        <p className="text-xs text-slate-600 italic py-2 text-center">Ultiplays animasyonu yok.</p>
+                      )}
+                    </div>
+
+                    {/* 3. Sıra: Destekleyici Maddeler */}
                     {currentPlaybook.youtube_url && (
                       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                        <h4 className="text-xs font-bold text-red-400 uppercase tracking-widest mb-3">📺 TAKTİK ANALİZ VİDEOSU</h4>
+                        <h4 className="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-2">📺 VİDEO ANALİZ</h4>
                         <iframe src={formatYoutubeEmbed(currentPlaybook.youtube_url)} className="w-full aspect-video rounded-xl bg-slate-950" allowFullScreen></iframe>
                       </div>
                     )}
                     {currentPlaybook.file_url && (
-                      <a href={currentPlaybook.file_url} target="_blank" rel="noreferrer" className="block bg-gradient-to-r from-cyan-950 to-slate-900 border border-cyan-800 hover:border-cyan-500 p-4 rounded-2xl text-center text-sm font-bold text-cyan-400 transition-all">📂 Bu Haftanın Ek Dökümanını / PDF Dosyasını Aç</a>
-                    )}
-                  </div>
-                </div>
-
-                {/* Mobil Düzeni (Kaptanın İstediği Sıralama: Odak Noktası ➔ Ultiplays ➔ Video/Dosya) */}
-                <div className="block lg:hidden space-y-6">
-                  {/* 1. Sırada: Odak Noktalarımız ve Notlar */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-                    <div className="border-b border-slate-800 pb-2">
-                      <span className="text-[9px] font-black tracking-widest text-emerald-400 uppercase">BU HAFTANIN ODAĞI</span>
-                      <h2 className="text-lg font-black text-white mt-0.5">{currentPlaybook.week_title}</h2>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{currentPlaybook.week_notes}</p>
-                  </div>
-
-                  {/* 2. Sırada: Ultiplays Taktik Tahtası */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-                    <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">🎬 ULTIPLAYS TAKTİK ANİMASYONU</h3>
-                    {currentPlaybook.ultiplays_url ? (
-                      <iframe src={currentPlaybook.ultiplays_url} className="w-full h-[320px] rounded-xl bg-slate-950 border border-slate-800" allowFullScreen></iframe>
-                    ) : (
-                      <p className="text-xs text-slate-600 italic py-4 text-center">Bu hafta için Ultiplays çizimi yüklenmedi.</p>
+                      <a href={currentPlaybook.file_url} target="_blank" rel="noreferrer" className="block bg-slate-900 border border-slate-800 p-3.5 rounded-xl text-center text-xs font-bold text-cyan-400">📂 Haftanın PDF / Dosyasını Görüntüle</a>
                     )}
                   </div>
 
-                  {/* 3. Sırada: Diğer Maddeler (YouTube Videosu ve Dosyalar) */}
-                  {currentPlaybook.youtube_url && (
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                      <h4 className="text-xs font-bold text-red-400 uppercase tracking-widest mb-3">📺 TAKTİK ANALİZ VİDEOSU</h4>
-                      <iframe src={formatYoutubeEmbed(currentPlaybook.youtube_url)} className="w-full aspect-video rounded-xl bg-slate-950" allowFullScreen></iframe>
+                </div>
+
+                {/* --- 🗄️ GEÇMİŞ HAFTALARIN OTOMATİK ARŞİVİ --- */}
+                <div className="border-t border-slate-800 pt-8">
+                  <h2 className="text-sm font-black text-slate-400 tracking-widest uppercase mb-4 flex items-center gap-2">
+                    🗄️ PLAYBOOK ARŞİVİ (GEÇMİŞ HAFTALAR)
+                  </h2>
+                  
+                  {playbookArchive.length === 0 ? (
+                    <p className="text-xs text-slate-600 italic pl-2">Henüz arşivlenmiş geçmiş bir hafta bulunmuyor.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {playbookArchive.map((archiveItem) => (
+                        <details key={archiveItem.id} className="group bg-slate-900 border border-slate-800 rounded-xl transition-all overflow-hidden">
+                          <summary className="list-none flex items-center justify-between p-4 cursor-pointer hover:bg-slate-800/50 select-none">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="text-base shrink-0 group-open:rotate-90 transition-transform text-slate-500">▶</span>
+                              <span className="text-xs md:text-sm font-bold text-slate-200 truncate">{archiveItem.week_title}</span>
+                            </div>
+                            <span className="text-[10px] font-medium text-slate-500 shrink-0 bg-slate-950 px-2.5 py-1 rounded-md border border-slate-800">
+                              {archiveItem.created_at ? new Date(archiveItem.created_at).toLocaleDateString("tr-TR") : "Eski"}
+                            </span>
+                          </summary>
+                          
+                          <div className="p-4 bg-slate-950 border-t border-slate-800 text-xs space-y-4">
+                            <div>
+                              <h5 className="font-bold text-emerald-400 mb-1">🎯 Antrenman Notları ve Detaylar:</h5>
+                              <p className="text-slate-300 leading-relaxed whitespace-pre-wrap pl-1">{archiveItem.week_notes}</p>
+                            </div>
+
+                            {/* Arşiv İçi Medya Yapısı */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                              {archiveItem.ultiplays_url && (
+                                <div className="space-y-2">
+                                  <h6 className="font-bold text-cyan-400">🎬 Arşivlenen Ultiplays Çizimi:</h6>
+                                  <iframe src={archiveItem.ultiplays_url} className="w-full h-[260px] rounded-xl bg-slate-900 border border-slate-800" allowFullScreen></iframe>
+                                </div>
+                              )}
+                              {archiveItem.youtube_url && (
+                                <div className="space-y-2">
+                                  <h6 className="font-bold text-red-400">📺 İlgili Video Kaydı:</h6>
+                                  <iframe src={formatYoutubeEmbed(archiveItem.youtube_url)} className="w-full h-[260px] rounded-xl bg-slate-900" allowFullScreen></iframe>
+                                </div>
+                              )}
+                            </div>
+
+                            {archiveItem.file_url && (
+                              <div className="pt-2">
+                                <a href={archiveItem.file_url} target="_blank" rel="noreferrer" className="inline-block text-cyan-400 hover:underline font-bold">
+                                  🔗 Bu haftaya ait ek dosyayı/PDF'i harici pencerede aç ➔
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      ))}
                     </div>
                   )}
-                  {currentPlaybook.file_url && (
-                    <a href={currentPlaybook.file_url} target="_blank" rel="noreferrer" className="block bg-slate-900 border border-slate-800 p-4 rounded-xl text-center text-xs font-bold text-cyan-400">📂 Bu Haftanın Ek Dökümanını / PDF Dosyasını Aç</a>
-                  )}
                 </div>
+
               </div>
             )}
           </div>
@@ -890,7 +961,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* MOBİL ALT MENÜ (DÖRT SEKMELİ HALE GETİRİLDİ) */}
+      {/* MOBİL ALT MENÜ */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur border-t border-slate-800 px-4 py-2 flex justify-around items-center z-50 shadow-2xl">
         <button onClick={() => setActiveTab("home")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "home" ? "text-emerald-400 font-bold" : "text-slate-400"}`}>
           <span className="text-lg">🏠</span>
