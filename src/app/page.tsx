@@ -23,6 +23,7 @@ type Challenge = {
   created_at: string;
   sender_name?: string;
   receiver_name?: string;
+  custom_title?: string;
 };
 
 type PlayerProfile = {
@@ -30,6 +31,8 @@ type PlayerProfile = {
   display_name: string;
   streak_weeks: number;
   badges: string[];
+  buddy_id: string | null;
+  is_captain: boolean;
 };
 
 export default function Home() {
@@ -38,8 +41,7 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
 
-  // Mobil Sekme Yönetimi ('home', 'challenges', 'stats')
-  const [activeTab, setActiveTab] = useState<"home" | "challenges" | "stats">("home");
+  const [activeTab, setActiveTab] = useState<"home" | "challenges" | "stats" | "captain">("home");
 
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [type, setType] = useState("Kum Antrenmanı");
@@ -49,14 +51,16 @@ export default function Home() {
 
   const [displayName, setDisplayName] = useState("");
   const [isUpdatingName, setIsUpdatingName] = useState(false);
-  const [allPlayers, setAllPlayers] = useState<{ id: string; display_name: string }[]>([]);
+  const [allPlayers, setAllPlayers] = useState<PlayerProfile[]>([]);
   const [activityFeed, setActivityFeed] = useState<Workout[]>([]);
   const [playerProfiles, setPlayerProfiles] = useState<{ [key: string]: PlayerProfile }>({});
+  const [myProfile, setMyProfile] = useState<PlayerProfile | null>(null);
 
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [targetReceiverId, setTargetReceiverId] = useState("");
   const [challengeType, setChallengeType] = useState("Kum Antrenmanı");
   const [challengeAmount, setChallengeAmount] = useState("");
+  const [customChallengeTitle, setCustomChallengeTitle] = useState("");
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -80,6 +84,7 @@ export default function Home() {
       setDisplayName("");
       setChallenges([]);
       setActivityFeed([]);
+      setMyProfile(null);
     }
   }, [user]);
 
@@ -93,8 +98,11 @@ export default function Home() {
 
   const fetchMyProfile = async () => {
     if (!user) return;
-    const { data } = await supabase.from("profiles").select("display_name").eq("id", user.id).single();
-    if (data) setDisplayName(data.display_name);
+    const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    if (data) {
+      setDisplayName(data.display_name || "");
+      setMyProfile(data as PlayerProfile);
+    }
   };
 
   const handleUpdateName = async (e: React.FormEvent) => {
@@ -105,17 +113,18 @@ export default function Home() {
     setIsUpdatingName(false);
     if (!error) {
       alert("İsmin başarıyla güncellendi.");
-      fetchLeaderboards();
+      initApp();
     }
   };
 
   const calculatePoints = (workoutType: string, amt: number) => {
     switch (workoutType) {
-      case "Kum Antrenmanı": return amt * 10; 
+      case "Kum Antrenmanı": return amt * 12; 
       case "Başka Takımla Antrenman": return amt * 6;  
       case "Disk Atma (Throwing)": return Math.floor(amt / 30) * 4; 
       case "Kondisyon (Gym/Yüzme/Koşu vs.)": return Math.floor(amt / 30) * 3; 
       case "Aktif Dinlenme (Esnetme/Recovery)": return Math.floor(amt / 30) * 1; 
+      case "Özel Meydan Okuma (Custom)": return 4; 
       default: return 0;
     }
   };
@@ -131,10 +140,16 @@ export default function Home() {
       const createdTime = new Date(c.created_at).getTime();
       if (now - createdTime > fortyEightHoursInMs) {
         await supabase.from("challenges").update({ status: "Süresi Doldu" }).eq("id", c.id);
+        
+        const penaltyPoints = c.workout_type === "Özel Meydan Okuma (Custom)" ? -2 : -3;
+        const label = c.workout_type === "Özel Meydan Okuma (Custom)" 
+          ? `❌ Düello Süresi Doldu (Ceza): ${c.custom_title}`
+          : `❌ Meydan Okuma Süresi Doldu (Ceza): ${c.workout_type}`;
+
         await supabase.from("workouts").insert([{
-          type: `❌ Meydan Okuma Süresi Doldu (Ceza): ${c.workout_type}`,
+          type: label,
           amount: c.amount,
-          points: -3,
+          points: penaltyPoints,
           user_id: c.receiver_id
         }]);
       }
@@ -162,8 +177,12 @@ export default function Home() {
 
   const sendChallenge = async (e: React.FormEvent) => {
     e.preventDefault();
-    const amt = Number(challengeAmount);
+    const amt = challengeType === "Özel Meydan Okuma (Custom)" ? 1 : Number(challengeAmount);
     if (!user || !targetReceiverId || !amt || amt <= 0) return;
+    if (challengeType === "Özel Meydan Okuma (Custom)" && !customChallengeTitle.trim()) {
+      alert("Lütfen özel meydan okuma için bir görev tanımı yazın!");
+      return;
+    }
 
     const targetActiveCount = challenges.filter(c => c.receiver_id === targetReceiverId && c.status === "Beklemede").length;
     if (targetActiveCount >= 2) {
@@ -176,13 +195,15 @@ export default function Home() {
       receiver_id: targetReceiverId,
       workout_type: challengeType,
       amount: amt,
-      status: "Beklemede"
+      status: "Beklemede",
+      custom_title: challengeType === "Özel Meydan Okuma (Custom)" ? customChallengeTitle : null
     }]);
 
     if (error) alert("Hata: " + error.message);
     else {
       alert("Meydan okuma başarıyla fırlatıldı! ⚔️");
       setChallengeAmount("");
+      setCustomChallengeTitle("");
       fetchChallenges();
     }
   };
@@ -191,9 +212,17 @@ export default function Home() {
     const { error: cError } = await supabase.from("challenges").update({ status: "Tamamlandı" }).eq("id", c.id);
     if (cError) return;
 
-    const basePoints = calculatePoints(c.workout_type, c.amount);
-    const totalAwarded = basePoints + 2; 
-    const label = `🏆 Challenge Başarıldı (${basePoints} + 2 Bonus): ${c.workout_type}`;
+    let totalAwarded = 0;
+    let label = "";
+
+    if (c.workout_type === "Özel Meydan Okuma (Custom)") {
+      totalAwarded = 4;
+      label = `🏆 Özel Düello Başarıldı (+4 Puan): ${c.custom_title}`;
+    } else {
+      const basePoints = calculatePoints(c.workout_type, c.amount);
+      totalAwarded = basePoints + 2; 
+      label = `🏆 Challenge Başarıldı (${basePoints} + 2 Bonus): ${c.workout_type}`;
+    }
 
     await supabase.from("workouts").insert([{
       type: label,
@@ -201,16 +230,6 @@ export default function Home() {
       points: totalAwarded,
       user_id: c.receiver_id
     }]);
-
-    const { data: myDoneChallenges } = await supabase.from("challenges")
-      .select("status")
-      .eq("receiver_id", c.receiver_id)
-      .order("id", { ascending: false })
-      .limit(3);
-
-    if (myDoneChallenges && myDoneChallenges.length === 3 && myDoneChallenges.every(ch => ch.status === "Tamamlandı")) {
-      await supabase.from("badges").insert([{ user_id: c.receiver_id, badge_type: "🎯 Düello Avcısı" }]).select();
-    }
 
     alert(`Tebrikler! Düelloyu kazandın ve ${totalAwarded} Puanı kaptın! 🥇`);
     initApp();
@@ -236,6 +255,19 @@ export default function Home() {
     if (data) setWorkouts(data);
   };
 
+  // 👥 KAPTAN DİNAMİK BUDDY BAĞLAMA FONKSİYONU
+  const getBuddyNameCombined = (uid: string, profileMap: { [key: string]: PlayerProfile }) => {
+    const player = profileMap[uid];
+    if (!player) return "Bilinmeyen";
+    
+    if (player.buddy_id && profileMap[player.buddy_id]) {
+      const buddy = profileMap[player.buddy_id];
+      // Alfabetik olarak sıralayarak ikililerin isimlerinin harmanlanmasını sabitliyoruz
+      return [player.display_name, buddy.display_name].sort().join(" & ");
+    }
+    return player.display_name;
+  };
+
   const fetchLeaderboards = async () => {
     if (!user) return;
     const { data: workoutsData } = await supabase.from("workouts").select("*").order("created_at", { ascending: false });
@@ -243,7 +275,7 @@ export default function Home() {
     const { data: badgesData } = await supabase.from("badges").select("*");
 
     if (profilesData) {
-      setAllPlayers(profilesData.filter(p => p.id !== user.id));
+      setAllPlayers(profilesData as PlayerProfile[]);
       
       const profileMap: { [key: string]: PlayerProfile } = {};
       profilesData.forEach(p => {
@@ -251,7 +283,9 @@ export default function Home() {
           id: p.id,
           display_name: p.display_name || "Oyuncu",
           streak_weeks: p.streak_weeks || 0,
-          badges: []
+          badges: [],
+          buddy_id: p.buddy_id,
+          is_captain: p.is_captain
         };
       });
 
@@ -269,74 +303,63 @@ export default function Home() {
         setActivityFeed(enrichedActivity);
 
         const { currentMonday, lastMonday, lastSunday } = getWeekRanges();
-        const currentWeekMap: { [key: string]: number } = {};
-        const lastWeekMap: { [key: string]: number } = {};
+        
+        // --- GEÇEN HAFTANIN PODYUMU (VERİTABANI BUDDY SİSTEMLİ) ---
+        const lastWeekBuddyMap: { [key: string]: number } = {};
+        workoutsData.forEach((w) => {
+          const workoutDate = new Date(w.created_at || "");
+          if (workoutDate >= lastMonday && workoutDate <= lastSunday) {
+            if (profileMap[w.user_id]) {
+              const bName = getBuddyNameCombined(w.user_id, profileMap);
+              lastWeekBuddyMap[bName] = (lastWeekBuddyMap[bName] || 0) + w.points;
+            }
+          }
+        });
+
+        const sortedLastWeek = Object.keys(lastWeekBuddyMap).map((bName) => ({
+          name: bName,
+          points: Number(lastWeekBuddyMap[bName].toFixed(1)),
+        })).sort((a, b) => b.points - a.points).slice(0, 3);
+
+        setLastWeekPodium(sortedLastWeek);
+
+        // --- BU HAFTANIN YARIŞI (VERİTABANI BUDDY SİSTEMLİ) ---
+        const currentWeekBuddyMap: { [key: string]: number } = {};
+        const currentWeekBuddyBadges: { [key: string]: string[] } = {};
+        const currentWeekBuddyIsMe: { [key: string]: boolean } = {};
+
+        Object.keys(profileMap).forEach((uid) => {
+          const bName = getBuddyNameCombined(uid, profileMap);
+          
+          if (!currentWeekBuddyMap[bName]) currentWeekBuddyMap[bName] = 0;
+          if (!currentWeekBuddyBadges[bName]) currentWeekBuddyBadges[bName] = [];
+          
+          profileMap[uid].badges.forEach(badge => {
+            if (!currentWeekBuddyBadges[bName].includes(badge)) {
+              currentWeekBuddyBadges[bName].push(badge);
+            }
+          });
+
+          if (uid === user.id) {
+            currentWeekBuddyIsMe[bName] = true;
+          }
+        });
 
         workoutsData.forEach((w) => {
           const workoutDate = new Date(w.created_at || "");
           if (workoutDate >= currentMonday) {
-            currentWeekMap[w.user_id] = (currentWeekMap[w.user_id] || 0) + w.points;
-          }
-          if (workoutDate >= lastMonday && workoutDate <= lastSunday) {
-            lastWeekMap[w.user_id] = (lastWeekMap[w.user_id] || 0) + w.points;
-          }
-        });
-
-        const sortedLastWeek = Object.keys(lastWeekMap).map((uid) => ({
-          id: uid,
-          name: profileMap[uid]?.display_name || `Oyuncu`,
-          points: Number(lastWeekMap[uid].toFixed(1)),
-        })).sort((a, b) => b.points - a.points).slice(0, 3); 
-
-        setLastWeekPodium(sortedLastWeek);
-
-        if (sortedLastWeek[0] && profileMap[sortedLastWeek[0].id]) profileMap[sortedLastWeek[0].id].badges.push("👑 MVP");
-        if (sortedLastWeek[1] && profileMap[sortedLastWeek[1].id]) profileMap[sortedLastWeek[1].id].badges.push("🥈 Podyum");
-        if (sortedLastWeek[2] && profileMap[sortedLastWeek[2].id]) profileMap[sortedLastWeek[2].id].badges.push("🥉 Podyum");
-
-        const currentWeekAttendance: { [key: string]: Set<string> } = {};
-        const recoveryCountMap: { [key: string]: number } = {};
-
-        workoutsData.forEach(w => {
-          const wDate = new Date(w.created_at || "");
-          const dayName = wDate.toLocaleDateString("tr-TR", { weekday: "long" });
-          
-          if (wDate >= currentMonday) {
-            if (!currentWeekAttendance[w.user_id]) currentWeekAttendance[w.user_id] = new Set();
-            currentWeekAttendance[w.user_id].add(dayName);
-          }
-
-          if (w.type.includes("Recovery")) {
-            recoveryCountMap[w.user_id] = (recoveryCountMap[w.user_id] || 0) + 1;
-          }
-        });
-
-        Object.keys(recoveryCountMap).forEach(async (uid) => {
-          if (recoveryCountMap[uid] >= 8) {
-            const hasBadge = profileMap[uid]?.badges.includes("🧘‍♂️ Recovery Ustası");
-            if (!hasBadge) {
-              await supabase.from("badges").insert([{ user_id: uid, badge_type: "🧘‍♂️ Recovery Ustası" }]);
+            if (profileMap[w.user_id]) {
+              const bName = getBuddyNameCombined(w.user_id, profileMap);
+              currentWeekBuddyMap[bName] = (currentWeekBuddyMap[bName] || 0) + w.points;
             }
           }
         });
 
-        Object.keys(currentWeekAttendance).forEach(async (uid) => {
-          if (currentWeekAttendance[uid].size >= 4) {
-            if (profileMap[uid] && profileMap[uid].streak_weeks >= 4) {
-              const hasBadge = profileMap[uid]?.badges.includes("🦾 İstikrar Abidesi");
-              if (!hasBadge) {
-                await supabase.from("badges").insert([{ user_id: uid, badge_type: "🦾 İstikrar Abidesi" }]);
-              }
-            }
-          }
-        });
-
-        const sortedCurrent = Object.keys(profileMap).map((uid) => ({
-          id: uid,
-          name: profileMap[uid].display_name,
-          points: Number((currentWeekMap[uid] || 0).toFixed(1)),
-          isMe: uid === user.id,
-          badges: profileMap[uid].badges
+        const sortedCurrent = Object.keys(currentWeekBuddyMap).map((bName) => ({
+          name: bName,
+          points: Number(currentWeekBuddyMap[bName].toFixed(1)),
+          isMe: !!currentWeekBuddyIsMe[bName],
+          badges: currentWeekBuddyBadges[bName]
         })).sort((a, b) => b.points - a.points);
 
         setCurrentLeaderboard(sortedCurrent);
@@ -358,10 +381,48 @@ export default function Home() {
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
+  // 👑 KAPTAN ÖZEL: BUDDY ATAMA TETİKLEYİCİSİ
+  const assignBuddy = async (playerAId: string, playerBId: string | null) => {
+    if (!myProfile?.is_captain) return;
+
+    if (!playerBId) {
+      // Buddy'yi kaldır (Tek başınaysa)
+      const currentBuddyId = playerProfiles[playerAId]?.buddy_id;
+      await supabase.from("profiles").update({ buddy_id: null }).eq("id", playerAId);
+      if (currentBuddyId) {
+        await supabase.from("profiles").update({ buddy_id: null }).eq("id", currentBuddyId);
+      }
+    } else {
+      // İki oyuncuyu karşılıklı birbirine bağla
+      await supabase.from("profiles").update({ buddy_id: playerBId }).eq("id", playerAId);
+      await supabase.from("profiles").update({ buddy_id: playerAId }).eq("id", playerBId);
+    }
+    
+    alert("Kaptanım, Buddy eşleşmesi başarıyla güncellendi! 🫡");
+    initApp();
+  };
+
   const addWorkout = async () => {
     if (!user) return;
     const numericAmount = Number(amount);
     if (!numericAmount || numericAmount <= 0) return;
+
+    if (type === "Kum Antrenmanı" && numericAmount > 1) {
+      alert("🚨 Limit Aşımı: Bir günde en fazla 1 adet Kum Antrenmanı girebilirsiniz.");
+      return;
+    }
+    if (type === "Başka Takımla Antrenman" && numericAmount > 1) {
+      alert("🚨 Limit Aşımı: Bir günde en fazla 1 adet Başka Takımla Antrenman girebilirsiniz.");
+      return;
+    }
+    if ((type === "Disk Atma (Throwing)" || type === "Kondisyon (Gym/Yüzme/Koşu vs.)") && numericAmount > 180) {
+      alert("🚨 Limit Aşımı: Bu antrenman türü için bir günde en fazla 180 dakika (3 saat) giriş yapabilirsiniz.");
+      return;
+    }
+    if (type === "Aktif Dinlenme (Esnetme/Recovery)" && numericAmount > 60) {
+      alert("🚨 Limit Aşımı: Vücudun tam toparlanması için Aktif Dinlenme süresi günde en fazla 60 dakika olarak sınırlandırılmıştır.");
+      return;
+    }
 
     const todayName = new Date().toLocaleDateString("tr-TR", { weekday: "long" });
     const { currentMonday } = getWeekRanges();
@@ -379,7 +440,7 @@ export default function Home() {
       const uniqueDays = att ? new Set(att.map(a => a.workout_day)) : new Set<string>();
 
       if (uniqueDays.size >= 5 && !uniqueDays.has(todayName)) {
-        alert("🚨 DUR VE DİNLEN! Haftalık 5 günlük ağır yüklenme sınırına ulaştın. Vücudunun toparlanması ve kaslarının güçlenmesi için bugün dinlenmelisin. 🛌 Ancak istersen 'Aktif Dinlenme (Recovery)' seçeneğini hala girebilirsin!");
+        alert("🚨 DUR VE DİNLEN! Haftalık 5 günlük ağır yüklenme sınırına ulaştın. Vücudunun toparlanması için bugün dinlenmelisin. 🛌 Ancak 'Aktif Dinlenme (Recovery)' seçeneğini hala girebilirsin!");
         return;
       }
     }
@@ -401,6 +462,9 @@ export default function Home() {
   };
 
   const deleteWorkout = async (id: number) => {
+    const confirmDelete = window.confirm("Bu antrenman kaydını silmek istediğinize emin misiniz? Puanınız geri düşecektir. 🗑️");
+    if (!confirmDelete) return;
+
     const { error } = await supabase.from("workouts").delete().eq("id", id);
     if (!error) initApp();
   };
@@ -434,32 +498,73 @@ export default function Home() {
             <span className="text-2xl md:text-3xl">🥏</span>
             <div>
               <h1 className="text-base md:text-xl font-extrabold text-white">FRİZBİ HUB</h1>
-              <p className="text-[10px] md:text-xs text-slate-400">Oyuncu Paneli</p>
+              <p className="text-[10px] md:text-xs text-slate-400">Oyuncu Paneli {myProfile?.is_captain && "• 👑 KAPTAN"}</p>
             </div>
           </div>
-          <button onClick={handleLogout} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl text-xs md:text-sm transition-all">Çıkış</button>
+          <div className="flex items-center gap-2">
+            {/* 👑 Kaptan Menü Butonu (Sadece Kaptana Görünür) */}
+            {myProfile?.is_captain && (
+              <button onClick={() => setActiveTab("captain")} className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all border ${activeTab === "captain" ? "bg-amber-500 text-slate-950 border-amber-400" : "bg-amber-950/40 text-amber-400 border-amber-900"}`}>👑 Kaptan Paneli</button>
+            )}
+            <button onClick={handleLogout} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl text-xs md:text-sm transition-all">Çıkış</button>
+          </div>
         </header>
 
-        {/* KÜRSÜ (Masaüstünde hep görünür, mobilde sadece Ana Sayfa sekmesinde) */}
-        {lastWeekPodium.length > 0 && (activeTab === "home") && (
-          <div className="bg-gradient-to-r from-amber-500/10 via-slate-900 to-cyan-500/10 border border-slate-800 rounded-2xl p-4 md:p-6 text-center">
-            <h3 className="text-[10px] md:text-xs font-bold text-amber-400 uppercase tracking-widest mb-4">🏆 GEÇEN HAFTANIN EN İYİLERİ (KÜRSÜ)</h3>
-            <div className="flex justify-center items-end gap-2 md:gap-4 pt-2">
-              {lastWeekPodium[1] && <div className="bg-slate-900/80 border border-slate-700 p-3 rounded-xl w-28 md:w-40 h-24 md:h-28 flex flex-col justify-center order-1 text-xs"><span className="text-sm md:text-base">🥈</span><p className="font-bold truncate">{lastWeekPodium[1].name}</p><p className="text-slate-400 text-[11px] md:text-sm">{lastWeekPodium[1].points} P</p></div>}
-              {lastWeekPodium[0] && <div className="bg-slate-900 border-2 border-amber-500 p-3 rounded-xl w-32 md:w-44 h-30 md:h-36 flex flex-col justify-center order-2 text-xs md:text-sm"><span className="animate-bounce text-base md:text-xl">👑</span><p className="text-amber-400 font-black truncate">{lastWeekPodium[0].name}</p><p className="text-white font-black text-sm md:text-lg">{lastWeekPodium[0].points} P</p></div>}
-              {lastWeekPodium[2] && <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-xl w-28 md:w-40 h-20 md:h-24 flex flex-col justify-center order-3 text-xs"><span className="text-sm md:text-base">🥉</span><p className="font-bold truncate">{lastWeekPodium[2].name}</p><p className="text-amber-700 text-[11px] md:text-xs">{lastWeekPodium[2].points} P</p></div>}
+        {/* 👑 KAPTAN ÖZEL BUDDY YÖNETİM SEKMESİ */}
+        {myProfile?.is_captain && activeTab === "captain" && (
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="border-b border-slate-800 pb-3">
+              <h2 className="text-lg font-black text-amber-400 flex items-center gap-2">👑 TAKIM BUDDY (ORTAKLIK) MERKEZİ</h2>
+              <p className="text-xs text-slate-400 mt-1">Kaptanım, bu alandan oyuncuları birbiriyle eşleştirebilirsin. Eşleşenlerin puanları sıralamada otomatik toplanır.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2">
+              {allPlayers.map((player) => (
+                <div key={player.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div>
+                    <p className="font-bold text-white text-sm">{player.display_name || "İsimsiz Oyuncu"}</p>
+                    <p className="text-[11px] text-amber-400/80 mt-0.5">
+                      Şu anki Ortağı: <span className="font-bold underline">{player.buddy_id ? (playerProfiles[player.buddy_id]?.display_name || "Yükleniyor...") : "Yok (Tek Başna)"}</span>
+                    </p>
+                  </div>
+                  <select
+                    value={player.buddy_id || ""}
+                    onChange={(e) => assignBuddy(player.id, e.target.value === "" ? null : e.target.value)}
+                    className="bg-slate-900 border border-slate-700 text-slate-200 p-2 rounded-xl focus:outline-none text-xs"
+                  >
+                    <option value="">Ortağı Yok (Tek Yarışsın)</option>
+                    {allPlayers.filter(p => p.id !== player.id).map(p => (
+                      <option key={p.id} value={p.id}>{p.display_name}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <div className="text-right">
+              <button onClick={() => setActiveTab("home")} className="bg-slate-800 text-slate-300 px-4 py-2 rounded-xl font-bold text-xs">Paneli Kapat</button>
             </div>
           </div>
         )}
 
-        {/* ⚔️ DÜELLO ALANI (Masaüstünde açık, Mobilde sekme kontrolünde) */}
+        {/* KÜRSÜ */}
+        {lastWeekPodium.length > 0 && (activeTab === "home") && (
+          <div className="bg-gradient-to-r from-amber-500/10 via-slate-900 to-cyan-500/10 border border-slate-800 rounded-2xl p-4 md:p-6 text-center">
+            <h3 className="text-[10px] md:text-xs font-bold text-amber-400 uppercase tracking-widest mb-4">🏆 GEÇEN HAFTANIN EN İYİ EKİPLERİ (KÜRSÜ)</h3>
+            <div className="flex justify-center items-end gap-2 md:gap-4 pt-2">
+              {lastWeekPodium[1] && <div className="bg-slate-900/80 border border-slate-700 p-3 rounded-xl w-28 md:w-48 h-24 md:h-28 flex flex-col justify-center order-1 text-xs"><span className="text-sm md:text-base">🥈</span><p className="font-bold truncate">{lastWeekPodium[1].name}</p><p className="text-slate-400 text-[11px] md:text-sm">{lastWeekPodium[1].points} P</p></div>}
+              {lastWeekPodium[0] && <div className="bg-slate-900 border-2 border-amber-500 p-3 rounded-xl w-32 md:w-56 h-30 md:h-36 flex flex-col justify-center order-2 text-xs md:text-sm"><span className="animate-bounce text-base md:text-xl">👑</span><p className="text-amber-400 font-black truncate">{lastWeekPodium[0].name}</p><p className="text-white font-black text-sm md:text-lg">{lastWeekPodium[0].points} P</p></div>}
+              {lastWeekPodium[2] && <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-xl w-28 md:w-48 h-20 md:h-24 flex flex-col justify-center order-3 text-xs"><span className="text-sm md:text-base">🥉</span><p className="font-bold truncate">{lastWeekPodium[2].name}</p><p className="text-amber-700 text-[11px] md:text-xs">{lastWeekPodium[2].points} P</p></div>}
+            </div>
+          </div>
+        )}
+
+        {/* DÜELLO ALANI */}
         <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${activeTab === "challenges" ? "block" : "hidden md:grid"}`}>
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl">
             <h3 className="text-xs md:text-sm font-bold text-red-400 uppercase tracking-widest mb-4">⚔️ DÜELLO TEKLİF ET</h3>
             <form onSubmit={sendChallenge} className="space-y-3">
               <select value={targetReceiverId} onChange={(e) => setTargetReceiverId(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs md:text-sm text-white focus:outline-none">
                 <option value="">Kime Meydan Okuyorsun?</option>
-                {allPlayers.map(p => <option key={p.id} value={p.id}>{p.display_name}</option>)}
+                {allPlayers.filter(p => p.id !== user.id).map(p => <option key={p.id} value={p.id}>{p.display_name}</option>)}
               </select>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <select value={challengeType} onChange={(e) => setChallengeType(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none">
@@ -468,11 +573,17 @@ export default function Home() {
                   <option>Disk Atma (Throwing)</option>
                   <option>Kondisyon (Gym/Yüzme/Koşu vs.)</option>
                   <option>Aktif Dinlenme (Esnetme/Recovery)</option>
+                  <option>Özel Meydan Okuma (Custom)</option>
                 </select>
-                <input type="number" placeholder={challengeType.includes("Antrenman") ? "Katılım Adedi" : "Süre (Dakika)"} value={challengeAmount} onChange={(e) => setChallengeAmount(e.target.value)} required className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none" />
+                
+                {challengeType === "Özel Meydan Okuma (Custom)" ? (
+                  <input type="text" placeholder="Görev Tanımı (Örn: 50 Şınav)" value={customChallengeTitle} onChange={(e) => setCustomChallengeTitle(e.target.value)} required className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none" />
+                ) : (
+                  <input type="number" placeholder={challengeType.includes("Antrenman") ? "Katılım Adedi" : "Süre (Dakika)"} value={challengeAmount} onChange={(e) => setChallengeAmount(e.target.value)} required className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none" />
+                )}
               </div>
-              <button type="submit" className="w-full bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold p-3 rounded-xl text-xs md:text-sm transition-all">Meydan Okumayı Ateşle (48 Saat Süre! 🔥)</button>
-              <p className="text-[10px] text-slate-500 text-center">Başarana: Normal Puan + 2 Bonus | Başaramayana: -3 Puan Ceza</p>
+              <button type="submit" className="w-full bg-gradient-to-r from-red-600 to-amber-600 text-white font-bold p-3 rounded-xl text-xs md:text-sm transition-all">Meydan Okumayı Ateşle 🔥</button>
+              <p className="text-[10px] text-slate-500 text-center">Custom Düello ➔ Başarana: +4 Puan | Başaramayana: -2 Puan Ceza</p>
             </form>
           </div>
 
@@ -485,7 +596,9 @@ export default function Home() {
                   <div key={c.id} className="bg-slate-950 border border-slate-800 p-3 rounded-xl flex justify-between items-center text-xs">
                     <div className="min-w-0 pr-2">
                       <p className="text-slate-300 font-bold truncate">⚔️ {c.sender_name} ➔ {c.receiver_name}</p>
-                      <p className="text-red-400 mt-0.5 font-semibold">GÖREV: {c.amount} {c.workout_type.includes("Antrenman") ? "Kez" : "Dk"} {c.workout_type}</p>
+                      <p className="text-red-400 mt-0.5 font-semibold uppercase text-[11px]">
+                        GÖREV: {c.workout_type === "Özel Meydan Okuma (Custom)" ? c.custom_title : `${c.amount} ${c.workout_type.includes("Antrenman") ? "Kez" : "Dk"} ${c.workout_type}`}
+                      </p>
                       <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] mt-1 font-bold ${c.status === "Beklemede" ? "bg-amber-950 text-amber-400" : c.status === "Tamamlandı" ? "bg-emerald-950 text-emerald-400" : "bg-red-950 text-red-400"}`}>{c.status === "Beklemede" ? "Savaş Devam Ediyor" : c.status}</span>
                     </div>
                     {isReceived && (
@@ -499,10 +612,10 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ANA RESPONSIVE GRID SISTEMI */}
+        {/* ANA RESPONSIVE GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* SÜTUN 1: PROFİL VE ANTRENMAN İŞLEME (Mobilde sadece 'home' sekmesinde açık) */}
+          {/* SÜTUN 1: ANTRENMAN İŞLEME */}
           <div className={`lg:col-span-4 space-y-6 ${activeTab === "home" ? "block" : "hidden lg:block"}`}>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Profil Ayarları</h3>
@@ -526,7 +639,7 @@ export default function Home() {
                   <option>Aktif Dinlenme (Esnetme/Recovery)</option>
                 </select>
                 <input type="number" placeholder={type.includes("Antrenman") ? "Katılım Adedi" : "Süre (Dakika)"} value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white text-xs focus:outline-none" />
-                <button onClick={addWorkout} className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold p-2.5 rounded-xl text-xs transition-all">Antrenman İşle</button>
+                <button onClick={addWorkout} className="w-full bg-emerald-500 text-slate-950 font-bold p-2.5 rounded-xl text-xs transition-all">Antrenman İşle</button>
               </div>
             </div>
 
@@ -537,7 +650,7 @@ export default function Home() {
                   <div key={w.id} className="bg-slate-950 border border-slate-800 p-2.5 rounded-xl flex justify-between items-center">
                     <div className="min-w-0">
                       <p className="font-bold text-white truncate">{w.type}</p>
-                      <p className="text-[10px] text-slate-500">{w.type.includes("Antrenman") || w.type.includes("Challenge") ? `${w.amount} Kez` : `${w.amount} Dk`}</p>
+                      <p className="text-[10px] text-slate-500">{w.type.includes("Antrenman") || w.type.includes("Düello") ? `${w.amount} Kez` : `${w.amount} Dk`}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`font-extrabold px-1.5 py-0.5 rounded ${w.points >= 0 ? "text-cyan-400 bg-cyan-950/40" : "text-red-400 bg-red-950/40"}`}>{w.points >= 0 ? `+${w.points}` : w.points}</span>
@@ -549,13 +662,13 @@ export default function Home() {
             </div>
           </div>
 
-          {/* SÜTUN 2: BU HAFTANIN YARIŞI VE ROZET VİTRİNİ (Mobilde sadece 'stats' sekmesinde açık) */}
+          {/* SÜTUN 2: LİDERLİK SIRALAMASI */}
           <div className={`lg:col-span-4 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl sticky top-8">
               <div className="text-center mb-5 pb-3 border-b border-slate-800">
                 <span className="text-2xl block mb-0.5">⚡</span>
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">BU HAFTANIN YARIŞI</h3>
-                <p className="text-[10px] text-slate-500 mt-0.5">Her Pazartesi otomatik sıfırlanır</p>
+                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">BU HAFTANIN YARIŞI (BUDDY LİGİ)</h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">Ortakların toplam puanı yarışır</p>
               </div>
               <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
                 {currentLeaderboard.map((player, index) => (
@@ -570,7 +683,7 @@ export default function Home() {
                     {player.badges && player.badges.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2 pt-1.5 border-t border-slate-800/40">
                         {player.badges.map((b: string, bIdx: number) => (
-                          <span key={bIdx} className="bg-slate-900 text-slate-300 border border-slate-800 text-[9px] px-1.5 py-0.5 rounded-md font-medium" title={b}>
+                          <span key={bIdx} className="bg-slate-900 text-slate-300 border border-slate-800 text-[9px] px-1.5 py-0.5 rounded-md font-medium">
                             {b}
                           </span>
                         ))}
@@ -582,8 +695,8 @@ export default function Home() {
             </div>
           </div>
 
-          {/* SÜTUN 3: CANLI TAKIM AKTİVİTE DUVARI (Mobilde sadece 'stats' sekmesinde açık) */}
-          <div className={`lg:col-span-4 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
+          {/* SÜTUN 3: AKTİVİTE DUVARI */}
+          <div className={`lg:col-span-4 mt-6 lg:mt-0 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl h-full flex flex-col">
               <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-1.5">
                 <span className="animate-pulse w-2 h-2 rounded-full bg-cyan-400 inline-block"></span>
@@ -604,18 +717,14 @@ export default function Home() {
                     </p>
                   </div>
                 ))}
-                {activityFeed.length === 0 && <p className="text-slate-600 text-center py-10">Henüz hiçbir aktivite yok.</p>}
               </div>
             </div>
           </div>
 
-          
-
         </div>
-
       </div>
 
-      {/* 📱 SABİT MOBİL ALT MENÜ (NAVIGATION BAR) - Sadece küçük ekranlarda görünür */}
+      {/* MOBİL ALT MENÜ */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur border-t border-slate-800 px-6 py-2 flex justify-around items-center z-50 shadow-2xl">
         <button onClick={() => setActiveTab("home")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "home" ? "text-emerald-400 font-bold" : "text-slate-400"}`}>
           <span className="text-xl">🏠</span>
