@@ -35,13 +35,24 @@ type PlayerProfile = {
   is_captain: boolean;
 };
 
+type PlaybookContent = {
+  id?: number;
+  week_title: string;
+  week_notes: string;
+  ultiplays_url: string;
+  youtube_url: string;
+  file_url: string;
+  created_at?: string;
+};
+
 export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<"home" | "challenges" | "stats" | "captain">("home");
+  // 📖 "playbook" sekmesini hem mobile hem masaüstüne ekledik
+  const [activeTab, setActiveTab] = useState<"home" | "challenges" | "stats" | "playbook" | "captain">("home");
 
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [type, setType] = useState("Kum Antrenmanı");
@@ -61,6 +72,15 @@ export default function Home() {
   const [challengeType, setChallengeType] = useState("Kum Antrenmanı");
   const [challengeAmount, setChallengeAmount] = useState("");
   const [customChallengeTitle, setCustomChallengeTitle] = useState("");
+
+  // 📖 Playbook State'leri
+  const [currentPlaybook, setCurrentPlaybook] = useState<PlaybookContent | null>(null);
+  const [pWeekTitle, setPWeekTitle] = useState("");
+  const [pWeekNotes, setPWeekNotes] = useState("");
+  const [pUltiplaysUrl, setPUltiplaysUrl] = useState("");
+  const [pYoutubeUrl, setPYoutubeUrl] = useState("");
+  const [pFileUrl, setPFileUrl] = useState("");
+  const [isSavingPlaybook, setIsSavingPlaybook] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -85,6 +105,7 @@ export default function Home() {
       setChallenges([]);
       setActivityFeed([]);
       setMyProfile(null);
+      setCurrentPlaybook(null);
     }
   }, [user]);
 
@@ -94,6 +115,7 @@ export default function Home() {
     await fetchChallenges();
     await fetchWorkouts();
     await fetchLeaderboards();
+    await fetchLatestPlaybook();
   };
 
   const fetchMyProfile = async () => {
@@ -103,6 +125,59 @@ export default function Home() {
       setDisplayName(data.display_name || "");
       setMyProfile(data as PlayerProfile);
     }
+  };
+
+  // 📖 Son yüklenen playbook taktiğini getir
+  const fetchLatestPlaybook = async () => {
+    const { data, error } = await supabase.from("playbook").select("*").order("id", { ascending: false }).limit(1);
+    if (data && data.length > 0) {
+      setCurrentPlaybook(data[0] as PlaybookContent);
+      // Kaptan paneline mevcut bilgileri önceden dolduralım doldurmak kolay olsun diye
+      setPWeekTitle(data[0].week_title || "");
+      setPWeekNotes(data[0].week_notes || "");
+      setPUltiplaysUrl(data[0].ultiplays_url || "");
+      setPYoutubeUrl(data[0].youtube_url || "");
+      setPFileUrl(data[0].file_url || "");
+    }
+  };
+
+  // 📖 Kaptan için yeni Playbook yayınlama fonksiyonu
+  const handleSavePlaybook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!myProfile?.is_captain) return;
+    setIsSavingPlaybook(true);
+
+    const { error } = await supabase.from("playbook").insert([{
+      week_title: pWeekTitle,
+      week_notes: pWeekNotes,
+      ultiplays_url: pUltiplaysUrl,
+      youtube_url: pYoutubeUrl,
+      file_url: pFileUrl
+    }]);
+
+    setIsSavingPlaybook(false);
+    if (error) {
+      alert("Playbook yüklenirken hata oluştu: " + error.message);
+    } else {
+      alert("Kaptanım, yeni haftanın taktik playbook'u tüm takıma başarıyla duyuruldu! 📖🚀");
+      fetchLatestPlaybook();
+      setActiveTab("playbook");
+    }
+  };
+
+  // YouTube Linkini Embed Formatına Çeviren Akıllı Yardımcı Fonksiyon
+  const formatYoutubeEmbed = (url: string) => {
+    if (!url) return "";
+    if (url.includes("embed/")) return url;
+    if (url.includes("v=")) {
+      const id = url.split("v=")[1]?.split("&")[0];
+      return `https://www.youtube.com/embed/${id}`;
+    }
+    if (url.includes("youtu.be/")) {
+      const id = url.split("youtu.be/")[1]?.split("?")[0];
+      return `https://www.youtube.com/embed/${id}`;
+    }
+    return url;
   };
 
   const handleUpdateName = async (e: React.FormEvent) => {
@@ -255,14 +330,12 @@ export default function Home() {
     if (data) setWorkouts(data);
   };
 
-  // 👥 KAPTAN DİNAMİK BUDDY BAĞLAMA FONKSİYONU
   const getBuddyNameCombined = (uid: string, profileMap: { [key: string]: PlayerProfile }) => {
     const player = profileMap[uid];
     if (!player) return "Bilinmeyen";
     
     if (player.buddy_id && profileMap[player.buddy_id]) {
       const buddy = profileMap[player.buddy_id];
-      // Alfabetik olarak sıralayarak ikililerin isimlerinin harmanlanmasını sabitliyoruz
       return [player.display_name, buddy.display_name].sort().join(" & ");
     }
     return player.display_name;
@@ -304,7 +377,6 @@ export default function Home() {
 
         const { currentMonday, lastMonday, lastSunday } = getWeekRanges();
         
-        // --- GEÇEN HAFTANIN PODYUMU (VERİTABANI BUDDY SİSTEMLİ) ---
         const lastWeekBuddyMap: { [key: string]: number } = {};
         workoutsData.forEach((w) => {
           const workoutDate = new Date(w.created_at || "");
@@ -323,14 +395,12 @@ export default function Home() {
 
         setLastWeekPodium(sortedLastWeek);
 
-        // --- BU HAFTANIN YARIŞI (VERİTABANI BUDDY SİSTEMLİ) ---
         const currentWeekBuddyMap: { [key: string]: number } = {};
         const currentWeekBuddyBadges: { [key: string]: string[] } = {};
         const currentWeekBuddyIsMe: { [key: string]: boolean } = {};
 
         Object.keys(profileMap).forEach((uid) => {
           const bName = getBuddyNameCombined(uid, profileMap);
-          
           if (!currentWeekBuddyMap[bName]) currentWeekBuddyMap[bName] = 0;
           if (!currentWeekBuddyBadges[bName]) currentWeekBuddyBadges[bName] = [];
           
@@ -381,19 +451,16 @@ export default function Home() {
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
-  // 👑 KAPTAN ÖZEL: BUDDY ATAMA TETİKLEYİCİSİ
   const assignBuddy = async (playerAId: string, playerBId: string | null) => {
     if (!myProfile?.is_captain) return;
 
     if (!playerBId) {
-      // Buddy'yi kaldır (Tek başınaysa)
       const currentBuddyId = playerProfiles[playerAId]?.buddy_id;
       await supabase.from("profiles").update({ buddy_id: null }).eq("id", playerAId);
       if (currentBuddyId) {
         await supabase.from("profiles").update({ buddy_id: null }).eq("id", currentBuddyId);
       }
     } else {
-      // İki oyuncuyu karşılıklı birbirine bağla
       await supabase.from("profiles").update({ buddy_id: playerBId }).eq("id", playerAId);
       await supabase.from("profiles").update({ buddy_id: playerAId }).eq("id", playerBId);
     }
@@ -502,7 +569,12 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* 👑 Kaptan Menü Butonu (Sadece Kaptana Görünür) */}
+            {/* Masaüstü Üst Menü Linkleri */}
+            <div className="hidden md:flex items-center gap-2 mr-2">
+              <button onClick={() => setActiveTab("home")} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${activeTab === "home" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"}`}>Ana Sayfa</button>
+              <button onClick={() => setActiveTab("playbook")} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${activeTab === "playbook" ? "bg-cyan-950 text-cyan-400 border border-cyan-800" : "text-slate-400 hover:text-white"}`}>📖 Playbook</button>
+            </div>
+
             {myProfile?.is_captain && (
               <button onClick={() => setActiveTab("captain")} className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all border ${activeTab === "captain" ? "bg-amber-500 text-slate-950 border-amber-400" : "bg-amber-950/40 text-amber-400 border-amber-900"}`}>👑 Kaptan Paneli</button>
             )}
@@ -510,42 +582,155 @@ export default function Home() {
           </div>
         </header>
 
-        {/* 👑 KAPTAN ÖZEL BUDDY YÖNETİM SEKMESİ */}
+        {/* 👑 KAPTAN GENİŞLETİLMİŞ YÖNETİM PANELİ */}
         {myProfile?.is_captain && activeTab === "captain" && (
-          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
-            <div className="border-b border-slate-800 pb-3">
-              <h2 className="text-lg font-black text-amber-400 flex items-center gap-2">👑 TAKIM BUDDY (ORTAKLIK) MERKEZİ</h2>
-              <p className="text-xs text-slate-400 mt-1">Kaptanım, bu alandan oyuncuları birbiriyle eşleştirebilirsin. Eşleşenlerin puanları sıralamada otomatik toplanır.</p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto pr-2">
-              {allPlayers.map((player) => (
-                <div key={player.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div>
-                    <p className="font-bold text-white text-sm">{player.display_name || "İsimsiz Oyuncu"}</p>
-                    <p className="text-[11px] text-amber-400/80 mt-0.5">
-                      Şu anki Ortağı: <span className="font-bold underline">{player.buddy_id ? (playerProfiles[player.buddy_id]?.display_name || "Yükleniyor...") : "Yok (Tek Başna)"}</span>
-                    </p>
+          <div className="space-y-6">
+            {/* BUDDY BAĞLAMA FORMU */}
+            <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
+              <div className="border-b border-slate-800 pb-3">
+                <h2 className="text-lg font-black text-amber-400 flex items-center gap-2">👑 TAKIM BUDDY (ORTAKLIK) MERKEZİ</h2>
+                <p className="text-xs text-slate-400 mt-1">Kaptanım, bu alandan oyuncuları birbiriyle eşleştirebilirsin.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[220px] overflow-y-auto pr-2">
+                {allPlayers.map((player) => (
+                  <div key={player.id} className="bg-slate-950 border border-slate-800 p-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div>
+                      <p className="font-bold text-white text-sm">{player.display_name || "İsimsiz Oyuncu"}</p>
+                      <p className="text-[11px] text-amber-400/80 mt-0.5">Ortağı: <span className="font-bold underline">{player.buddy_id ? (playerProfiles[player.buddy_id]?.display_name || "Yükleniyor...") : "Yok"}</span></p>
+                    </div>
+                    <select
+                      value={player.buddy_id || ""}
+                      onChange={(e) => assignBuddy(player.id, e.target.value === "" ? null : e.target.value)}
+                      className="bg-slate-900 border border-slate-700 text-slate-200 p-2 rounded-xl text-xs"
+                    >
+                      <option value="">Ortağı Yok (Tek Yarışsın)</option>
+                      {allPlayers.filter(p => p.id !== player.id).map(p => (
+                        <option key={p.id} value={p.id}>{p.display_name}</option>
+                      ))}
+                    </select>
                   </div>
-                  <select
-                    value={player.buddy_id || ""}
-                    onChange={(e) => assignBuddy(player.id, e.target.value === "" ? null : e.target.value)}
-                    className="bg-slate-900 border border-slate-700 text-slate-200 p-2 rounded-xl focus:outline-none text-xs"
-                  >
-                    <option value="">Ortağı Yok (Tek Yarışsın)</option>
-                    {allPlayers.filter(p => p.id !== player.id).map(p => (
-                      <option key={p.id} value={p.id}>{p.display_name}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-            <div className="text-right">
-              <button onClick={() => setActiveTab("home")} className="bg-slate-800 text-slate-300 px-4 py-2 rounded-xl font-bold text-xs">Paneli Kapat</button>
+
+            {/* 📖 YENİ TAKTİK & PLAYBOOK YÜKLEME FORMU */}
+            <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl p-6 shadow-2xl">
+              <div className="border-b border-slate-800 pb-3 mb-4">
+                <h2 className="text-lg font-black text-cyan-400 flex items-center gap-2">📖 HAFTALIK TAKTİK & PLAYBOOK YAYINLA</h2>
+                <p className="text-xs text-slate-400 mt-1">Buraya girdiğin taktik notları, Ultiplays animasyonları ve videolar anında tüm takımın telefonundaki Playbook sekmesine düşer.</p>
+              </div>
+              <form onSubmit={handleSavePlaybook} className="space-y-4 text-xs">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Hafta Başlığı</label>
+                  <input type="text" placeholder="Örn: 3. Hafta: Zone Savunma ve Cup Yerleşim Mantığı" value={pWeekTitle} onChange={(e) => setPWeekTitle(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">🎯 Haftanın Odak Noktaları ve Antrenman Notları</label>
+                  <textarea rows={5} placeholder="Bu hafta antrenmanda tam olarak neye odaklanacağız? Adım adım detayları yazın..." value={pWeekNotes} onChange={(e) => setPWeekNotes(e.target.value)} required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none leading-relaxed" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Ultiplays Paylaşım/Embed Linki</label>
+                    <input type="url" placeholder="https://ultiplays.com/playbook/..." value={pUltiplaysUrl} onChange={(e) => setPUltiplaysUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">YouTube Video Linki (Opsiyonel)</label>
+                    <input type="url" placeholder="https://www.youtube.com/watch?v=..." value={pYoutubeUrl} onChange={(e) => setPYoutubeUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">Ek Dosya / PDF / Fotoğraf Linki (Opsiyonel)</label>
+                    <input type="url" placeholder="Bulut veya Drive dosya linki" value={pFileUrl} onChange={(e) => setPFileUrl(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none" />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button type="button" onClick={() => setActiveTab("home")} className="bg-slate-800 text-slate-300 px-4 py-2 rounded-xl font-bold">İptal</button>
+                  <button type="submit" disabled={isSavingPlaybook} className="bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-black px-6 py-2 rounded-xl shadow-lg">{isSavingPlaybook ? "Yayınlanıyor..." : "Taktikleri Takıma Fırlat 🚀"}</button>
+                </div>
+              </form>
             </div>
           </div>
         )}
 
-        {/* KÜRSÜ */}
+        {/* 📖 YENİ PLAYBOOK GÖRÜNTÜLEME SEKME ALANI (RESPONSIVE) */}
+        {activeTab === "playbook" && (
+          <div className="space-y-6">
+            {!currentPlaybook ? (
+              <div className="bg-slate-900 border border-slate-800 p-12 text-center rounded-2xl">
+                <span className="text-4xl block mb-2">📖</span>
+                <p className="text-slate-400 text-sm">Kaptanınız henüz bu haftanın taktik playbook içeriklerini yüklemedi.</p>
+              </div>
+            ) : (
+              <div>
+                {/* Masaüstü Düzeni (Yan Yana) */}
+                <div className="hidden lg:grid lg:grid-cols-12 gap-6">
+                  {/* Sol Taraf: Ultiplays Taktik Tahtası (Geniş Ekran) */}
+                  <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col h-[600px]">
+                    <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-3">🎬 ULTIPLAYS CANLI TAKTİK ANİMASYONU</h3>
+                    {currentPlaybook.ultiplays_url ? (
+                      <iframe src={currentPlaybook.ultiplays_url} className="w-full flex-1 rounded-xl bg-slate-950 border border-slate-800" allowFullScreen></iframe>
+                    ) : (
+                      <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center text-xs text-slate-600">Bu hafta için Ultiplays çizimi yüklenmedi.</div>
+                    )}
+                  </div>
+                  {/* Sağ Taraf: Notlar ve Diğer Maddeler */}
+                  <div className="lg:col-span-5 space-y-6 max-h-[600px] overflow-y-auto pr-1">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                      <div className="border-b border-slate-800 pb-2">
+                        <span className="text-[10px] font-black tracking-widest text-emerald-400 uppercase">BU HAFTANIN ODAĞI</span>
+                        <h2 className="text-xl font-black text-white mt-1">{currentPlaybook.week_title}</h2>
+                      </div>
+                      <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{currentPlaybook.week_notes}</p>
+                    </div>
+                    {currentPlaybook.youtube_url && (
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                        <h4 className="text-xs font-bold text-red-400 uppercase tracking-widest mb-3">📺 TAKTİK ANALİZ VİDEOSU</h4>
+                        <iframe src={formatYoutubeEmbed(currentPlaybook.youtube_url)} className="w-full aspect-video rounded-xl bg-slate-950" allowFullScreen></iframe>
+                      </div>
+                    )}
+                    {currentPlaybook.file_url && (
+                      <a href={currentPlaybook.file_url} target="_blank" rel="noreferrer" className="block bg-gradient-to-r from-cyan-950 to-slate-900 border border-cyan-800 hover:border-cyan-500 p-4 rounded-2xl text-center text-sm font-bold text-cyan-400 transition-all">📂 Bu Haftanın Ek Dökümanını / PDF Dosyasını Aç</a>
+                    )}
+                  </div>
+                </div>
+
+                {/* Mobil Düzeni (Kaptanın İstediği Sıralama: Odak Noktası ➔ Ultiplays ➔ Video/Dosya) */}
+                <div className="block lg:hidden space-y-6">
+                  {/* 1. Sırada: Odak Noktalarımız ve Notlar */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                    <div className="border-b border-slate-800 pb-2">
+                      <span className="text-[9px] font-black tracking-widest text-emerald-400 uppercase">BU HAFTANIN ODAĞI</span>
+                      <h2 className="text-lg font-black text-white mt-0.5">{currentPlaybook.week_title}</h2>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{currentPlaybook.week_notes}</p>
+                  </div>
+
+                  {/* 2. Sırada: Ultiplays Taktik Tahtası */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">🎬 ULTIPLAYS TAKTİK ANİMASYONU</h3>
+                    {currentPlaybook.ultiplays_url ? (
+                      <iframe src={currentPlaybook.ultiplays_url} className="w-full h-[320px] rounded-xl bg-slate-950 border border-slate-800" allowFullScreen></iframe>
+                    ) : (
+                      <p className="text-xs text-slate-600 italic py-4 text-center">Bu hafta için Ultiplays çizimi yüklenmedi.</p>
+                    )}
+                  </div>
+
+                  {/* 3. Sırada: Diğer Maddeler (YouTube Videosu ve Dosyalar) */}
+                  {currentPlaybook.youtube_url && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                      <h4 className="text-xs font-bold text-red-400 uppercase tracking-widest mb-3">📺 TAKTİK ANALİZ VİDEOSU</h4>
+                      <iframe src={formatYoutubeEmbed(currentPlaybook.youtube_url)} className="w-full aspect-video rounded-xl bg-slate-950" allowFullScreen></iframe>
+                    </div>
+                  )}
+                  {currentPlaybook.file_url && (
+                    <a href={currentPlaybook.file_url} target="_blank" rel="noreferrer" className="block bg-slate-900 border border-slate-800 p-4 rounded-xl text-center text-xs font-bold text-cyan-400">📂 Bu Haftanın Ek Dökümanını / PDF Dosyasını Aç</a>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* KÜRSÜ (YALNIZCA ANA SAYFADA) */}
         {lastWeekPodium.length > 0 && (activeTab === "home") && (
           <div className="bg-gradient-to-r from-amber-500/10 via-slate-900 to-cyan-500/10 border border-slate-800 rounded-2xl p-4 md:p-6 text-center">
             <h3 className="text-[10px] md:text-xs font-bold text-amber-400 uppercase tracking-widest mb-4">🏆 GEÇEN HAFTANIN EN İYİ EKİPLERİ (KÜRSÜ)</h3>
@@ -583,7 +768,6 @@ export default function Home() {
                 )}
               </div>
               <button type="submit" className="w-full bg-gradient-to-r from-red-600 to-amber-600 text-white font-bold p-3 rounded-xl text-xs md:text-sm transition-all">Meydan Okumayı Ateşle 🔥</button>
-              <p className="text-[10px] text-slate-500 text-center">Custom Düello ➔ Başarana: +4 Puan | Başaramayana: -2 Puan Ceza</p>
             </form>
           </div>
 
@@ -596,24 +780,21 @@ export default function Home() {
                   <div key={c.id} className="bg-slate-950 border border-slate-800 p-3 rounded-xl flex justify-between items-center text-xs">
                     <div className="min-w-0 pr-2">
                       <p className="text-slate-300 font-bold truncate">⚔️ {c.sender_name} ➔ {c.receiver_name}</p>
-                      <p className="text-red-400 mt-0.5 font-semibold uppercase text-[11px]">
-                        GÖREV: {c.workout_type === "Özel Meydan Okuma (Custom)" ? c.custom_title : `${c.amount} ${c.workout_type.includes("Antrenman") ? "Kez" : "Dk"} ${c.workout_type}`}
-                      </p>
+                      <p className="text-red-400 mt-0.5 font-semibold uppercase text-[11px]">GÖREV: {c.workout_type === "Özel Meydan Okuma (Custom)" ? c.custom_title : `${c.amount} ${c.workout_type.includes("Antrenman") ? "Kez" : "Dk"} ${c.workout_type}`}</p>
                       <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] mt-1 font-bold ${c.status === "Beklemede" ? "bg-amber-950 text-amber-400" : c.status === "Tamamlandı" ? "bg-emerald-950 text-emerald-400" : "bg-red-950 text-red-400"}`}>{c.status === "Beklemede" ? "Savaş Devam Ediyor" : c.status}</span>
                     </div>
                     {isReceived && (
-                      <button onClick={() => completeChallenge(c)} className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-3 py-2 rounded-xl shrink-0 transition-all">Yaptım 🥇</button>
+                      <button onClick={() => completeChallenge(c)} className="bg-emerald-500 text-slate-950 font-black px-3 py-2 rounded-xl shrink-0 transition-all">Yaptım 🥇</button>
                     )}
                   </div>
                 );
               })}
-              {challenges.length === 0 && <p className="text-xs text-slate-600 text-center py-6">Şu an aktif düello yok.</p>}
             </div>
           </div>
         </div>
 
-        {/* ANA RESPONSIVE GRID */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* ANA TAB GÖSTERİM ALANLARI */}
+        <div className={`grid grid-cols-1 lg:grid-cols-12 gap-6 ${activeTab === "home" || activeTab === "stats" ? "grid" : "hidden lg:grid"}`}>
           
           {/* SÜTUN 1: ANTRENMAN İŞLEME */}
           <div className={`lg:col-span-4 space-y-6 ${activeTab === "home" ? "block" : "hidden lg:block"}`}>
@@ -668,7 +849,6 @@ export default function Home() {
               <div className="text-center mb-5 pb-3 border-b border-slate-800">
                 <span className="text-2xl block mb-0.5">⚡</span>
                 <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">BU HAFTANIN YARIŞI (BUDDY LİGİ)</h3>
-                <p className="text-[10px] text-slate-500 mt-0.5">Ortakların toplam puanı yarışır</p>
               </div>
               <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
                 {currentLeaderboard.map((player, index) => (
@@ -680,15 +860,6 @@ export default function Home() {
                       </div>
                       <span className="font-black text-white">{player.points} <span className="text-[9px] font-normal text-slate-500">P</span></span>
                     </div>
-                    {player.badges && player.badges.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2 pt-1.5 border-t border-slate-800/40">
-                        {player.badges.map((b: string, bIdx: number) => (
-                          <span key={bIdx} className="bg-slate-900 text-slate-300 border border-slate-800 text-[9px] px-1.5 py-0.5 rounded-md font-medium">
-                            {b}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
@@ -707,14 +878,9 @@ export default function Home() {
                   <div key={idx} className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl space-y-1">
                     <div className="flex justify-between items-start gap-2">
                       <span className="font-bold text-slate-200 truncate">{act.player_name}</span>
-                      <span className={`font-black shrink-0 px-1.5 py-0.5 rounded text-[10px] ${act.points >= 0 ? "text-emerald-400 bg-emerald-950/50" : "text-red-400 bg-red-950/50"}`}>
-                        {act.points >= 0 ? `+${act.points}` : act.points} P
-                      </span>
+                      <span className={`font-black shrink-0 px-1.5 py-0.5 rounded text-[10px] ${act.points >= 0 ? "text-emerald-400 bg-emerald-950/50" : "text-red-400 bg-red-950/50"}`}>{act.points >= 0 ? `+${act.points}` : act.points} P</span>
                     </div>
-                    <p className="text-slate-400 text-[11px] italic">
-                      {act.type.includes("🏆") || act.type.includes("❌") ? "" : `🏃‍♂️ ${act.amount} ${act.type.includes("Antrenman") ? "Kez" : "Dk"} `}
-                      {act.type}
-                    </p>
+                    <p className="text-slate-400 text-[11px] italic">{act.type.includes("🏆") || act.type.includes("❌") ? "" : `🏃‍♂️ ${act.amount} ${act.type.includes("Antrenman") ? "Kez" : "Dk"} `}{act.type}</p>
                   </div>
                 ))}
               </div>
@@ -724,21 +890,26 @@ export default function Home() {
         </div>
       </div>
 
-      {/* MOBİL ALT MENÜ */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur border-t border-slate-800 px-6 py-2 flex justify-around items-center z-50 shadow-2xl">
+      {/* MOBİL ALT MENÜ (DÖRT SEKMELİ HALE GETİRİLDİ) */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur border-t border-slate-800 px-4 py-2 flex justify-around items-center z-50 shadow-2xl">
         <button onClick={() => setActiveTab("home")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "home" ? "text-emerald-400 font-bold" : "text-slate-400"}`}>
-          <span className="text-xl">🏠</span>
-          <span className="text-[10px]">Ana Sayfa</span>
+          <span className="text-lg">🏠</span>
+          <span className="text-[9px]">Ana Sayfa</span>
         </button>
         
+        <button onClick={() => setActiveTab("playbook")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "playbook" ? "text-cyan-400 font-bold" : "text-slate-400"}`}>
+          <span className="text-lg">📖</span>
+          <span className="text-[9px]">Playbook</span>
+        </button>
+
         <button onClick={() => setActiveTab("challenges")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "challenges" ? "text-red-400 font-bold" : "text-slate-400"}`}>
-          <span className="text-xl">⚔️</span>
-          <span className="text-[10px]">Düellolar</span>
+          <span className="text-lg">⚔️</span>
+          <span className="text-[9px]">Düellolar</span>
         </button>
         
-        <button onClick={() => setActiveTab("stats")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "stats" ? "text-cyan-400 font-bold" : "text-slate-400"}`}>
-          <span className="text-xl">📈</span>
-          <span className="text-[10px]">Sıralama</span>
+        <button onClick={() => setActiveTab("stats")} className={`flex flex-col items-center gap-0.5 p-2 transition-all ${activeTab === "stats" ? "text-slate-200 font-bold" : "text-slate-400"}`}>
+          <span className="text-lg">📈</span>
+          <span className="text-[9px]">Sıralama</span>
         </button>
       </div>
     </main>
