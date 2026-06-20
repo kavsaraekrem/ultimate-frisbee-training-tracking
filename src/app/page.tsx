@@ -143,7 +143,7 @@ export default function Home() {
       setPWeekNotes("");
       setPUltiplaysUrl("");
       setPYoutubeUrl("");
-      pFileUrl("");
+      setPFileUrl("");
     } else {
       setCurrentPlaybook(null);
       setPlaybookArchive([]);
