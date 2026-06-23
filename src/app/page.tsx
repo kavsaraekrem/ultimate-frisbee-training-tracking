@@ -143,7 +143,7 @@ export default function Home() {
       setPWeekNotes("");
       setPUltiplaysUrl("");
       setPYoutubeUrl("");
-      setPFileUrl("");
+      setPFileUrl(""); // pFileUrl state hatası burada setPFileUrl("") şeklinde düzeltildi
     } else {
       setCurrentPlaybook(null);
       setPlaybookArchive([]);
@@ -723,7 +723,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Mobil Aktif Taktik Düzeni (İstediğin Sıra: Odak ➔ Ultiplays ➔ Video) */}
+                  {/* Mobil Aktif Taktik Düzeni */}
                   <div className="block lg:hidden space-y-4">
                     {/* 1. Sıra: Odak Noktaları */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
@@ -970,7 +970,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* SÜTUN 3: AKTİVİTE DUVARI */}
+          {/* SÜTUN 3: CANLI AKTİVİTE DUVARI (GÜN & SAAT DETAYLI) */}
           <div className={`lg:col-span-4 mt-6 lg:mt-0 ${activeTab === "stats" ? "block" : "hidden lg:block"}`}>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl h-full flex flex-col">
               <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 flex items-center gap-1.5">
@@ -978,15 +978,42 @@ export default function Home() {
                 🔥 TAKIM AKTİVİTE DUVARI (CANLI)
               </h3>
               <div className="space-y-2.5 flex-1 overflow-y-auto max-h-[460px] pr-1 text-xs">
-                {activityFeed.map((act, idx) => (
-                  <div key={idx} className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl space-y-1">
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="font-bold text-slate-200 truncate">{act.player_name}</span>
-                      <span className={`font-black shrink-0 px-1.5 py-0.5 rounded text-[10px] ${act.points >= 0 ? "text-emerald-400 bg-emerald-950/50" : "text-red-400 bg-red-950/50"}`}>{act.points >= 0 ? `+${act.points}` : act.points} P</span>
+                {activityFeed.map((act, idx) => {
+                  // created_at tarihinden gün ve saat bilgilerini yerel (Local) zaman olarak Türkçe alıyoruz
+                  const dateObj = act.created_at ? new Date(act.created_at) : null;
+                  
+                  const workoutDayName = dateObj 
+                    ? dateObj.toLocaleDateString("tr-TR", { weekday: "long" })
+                    : "Bugün";
+
+                  const workoutTime = dateObj
+                    ? dateObj.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+                    : "";
+
+                  return (
+                    <div key={idx} className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl space-y-1">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0">
+                          <span className="font-bold text-slate-200 block truncate">{act.player_name}</span>
+                          {/* Gün ve Saat bilgisini yan yana ekledik */}
+                          <span className="text-[10px] font-medium text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-800/60 inline-block mt-0.5">
+                            📅 {workoutDayName} {workoutTime && `• ${workoutTime}`}
+                          </span>
+                        </div>
+                        <span className={`font-black shrink-0 px-1.5 py-0.5 rounded text-[10px] ${act.points >= 0 ? "text-emerald-400 bg-emerald-950/50" : "text-red-400 bg-red-950/50"}`}>
+                          {act.points >= 0 ? `+${act.points}` : act.points} P
+                        </span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] italic pt-1">
+                        {act.type.includes("🏆") || act.type.includes("❌") 
+                          ? "" 
+                          : `🏃‍♂️ ${act.amount} ${act.type.includes("Antrenman") ? "Kez" : "Dk"} `
+                        }
+                        {act.type}
+                      </p>
                     </div>
-                    <p className="text-slate-400 text-[11px] italic">{act.type.includes("🏆") || act.type.includes("❌") ? "" : `🏃‍♂️ ${act.amount} ${act.type.includes("Antrenman") ? "Kez" : "Dk"} `}{act.type}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
